@@ -57,7 +57,7 @@ describe("usePersistedState", () => {
     );
 
     const { usePersistedState } = await import("@/hooks/use-persisted-state");
-    const { result } = renderHook(() =>
+    renderHook(() =>
       usePersistedState<Record<string, string>>("test-key", {})
     );
 
@@ -131,7 +131,7 @@ describe("useTokenBudget", () => {
     );
 
     const { useTokenBudget } = await import("@/hooks/use-token-budget");
-    const { result } = renderHook(() => useTokenBudget());
+    renderHook(() => useTokenBudget());
 
     // Should fall back to defaults for invalid fields
     // (After useEffect hydration)

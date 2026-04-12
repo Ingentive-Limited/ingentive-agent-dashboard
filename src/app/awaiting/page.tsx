@@ -171,19 +171,18 @@ export default function AwaitingPage() {
     "/api/sessions",
     3000
   );
-  const [browserPermission, setBrowserPermission] = useState<"default" | "granted" | "denied">("default");
+  const [browserPermission, setBrowserPermission] = useState<"default" | "granted" | "denied">(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      return Notification.permission;
+    }
+    return "default";
+  });
   const { request } = useNotificationPermission();
   const { prefs, update } = useNotificationPreferences();
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
   const [viewingSession, setViewingSession] = useState<ClaudeSession | null>(null);
 
   useAwaitingNotifications(sessions);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window) {
-      setBrowserPermission(Notification.permission);
-    }
-  }, []);
 
   const handleNotificationToggle = async () => {
     if (browserPermission !== "granted") {

@@ -183,26 +183,35 @@ export function ConversationViewer({
   useEffect(() => {
     if (!open || !sessionId) return;
 
-    setLoading(true);
-    setError(null);
+    let cancelled = false;
 
-    fetch(`/api/sessions/${encodeURIComponent(sessionId)}/conversation`)
-      .then(async (res) => {
+    const loadConversation = async () => {
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/conversation`);
+        if (cancelled) return;
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Failed to load conversation");
         }
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
+        if (cancelled) return;
         setMessages(data.messages || []);
-        // Scroll to bottom after render
         setTimeout(() => {
           bottomRef.current?.scrollIntoView({ behavior: "smooth" });
         }, 100);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    setMessages([]);
+    setError(null);
+    setLoading(true);
+    loadConversation();
+
+    return () => { cancelled = true; };
   }, [open, sessionId]);
 
   return (

@@ -29,12 +29,6 @@ import { EmptyState } from "@/components/empty-state";
 type SortKey = "name" | "activity" | "tokens" | "cost" | "sessions" | "errors";
 type GroupMode = "none" | "directory";
 
-function parentDir(p: string): string {
-  const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
-  if (parts.length <= 1) return "/";
-  return parts.slice(0, -1).join("/");
-}
-
 function ErrorRateBadge({ errorRate, errorCount, successCount }: { errorRate: number; errorCount: number; successCount: number }) {
   if (errorCount + successCount === 0) return null;
   const pct = Math.round(errorRate * 100);

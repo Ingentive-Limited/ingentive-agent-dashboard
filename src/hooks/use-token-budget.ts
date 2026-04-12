@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 
 export interface TokenBudget {
   enabled: boolean;
@@ -48,11 +48,7 @@ export interface BudgetStatus {
 }
 
 export function useTokenBudget() {
-  const [budget, setBudget] = useState<TokenBudget>(DEFAULT_BUDGET);
-
-  useEffect(() => {
-    setBudget(loadBudget());
-  }, []);
+  const [budget, setBudget] = useState<TokenBudget>(loadBudget);
 
   const update = useCallback((partial: Partial<TokenBudget>) => {
     setBudget((prev) => {

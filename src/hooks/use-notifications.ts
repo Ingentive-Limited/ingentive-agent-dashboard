@@ -39,11 +39,7 @@ function savePrefs(prefs: NotificationPreferences) {
 }
 
 export function useNotificationPreferences() {
-  const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_PREFS);
-
-  useEffect(() => {
-    setPrefs(loadPrefs());
-  }, []);
+  const [prefs, setPrefs] = useState<NotificationPreferences>(loadPrefs);
 
   const update = useCallback((partial: Partial<NotificationPreferences>) => {
     setPrefs((prev) => {

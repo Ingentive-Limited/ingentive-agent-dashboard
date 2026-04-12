@@ -70,14 +70,14 @@ export function TokenChart({ data }: { data: TokenDataPoint[] }) {
   const totalOutput = data.reduce((sum, d) => sum + d.output_tokens, 0);
   const summaryText = `Token usage over time chart. ${data.length} data points. Total input: ${formatTokens(totalInput)}, total output: ${formatTokens(totalOutput)}.`;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const renderLegend = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (props: any) => {
-      const payload = props?.payload as Array<{ value: string; dataKey?: string; color?: string }> | undefined;
+      const { payload } = props;
       if (!payload) return null;
       return (
         <div className="flex justify-center gap-4 mt-2 text-xs">
-          {payload.map((entry) => {
+          {payload.map((entry: { value?: string; dataKey?: string; color?: string }) => {
             const isHidden = hidden.has(entry.dataKey || "");
             return (
               <button

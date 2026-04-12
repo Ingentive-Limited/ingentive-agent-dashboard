@@ -3,7 +3,7 @@
 import { usePolling } from "@/hooks/use-polling";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import type { SystemStatus } from "@/lib/types";
-import { Terminal, Wifi, WifiOff, Activity, Key, CreditCard } from "lucide-react";
+import { Terminal, Activity, Key, CreditCard } from "lucide-react";
 
 function StatusDot({ status }: { status: "operational" | "degraded" | "unknown" }) {
   const color =

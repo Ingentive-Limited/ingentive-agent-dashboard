@@ -13,7 +13,8 @@ export function usePersistedState<T>(
   const [state, setState] = useState<T>(defaultValue);
   const [hydrated, setHydrated] = useState(false);
 
-  // Hydrate from localStorage on mount
+  // Hydrate from localStorage on mount — setState here is intentional to
+  // sync React state with the external localStorage store after SSR.
   useEffect(() => {
     try {
       const stored = localStorage.getItem(key);
@@ -25,7 +26,7 @@ export function usePersistedState<T>(
           delete parsed.constructor;
           delete parsed.prototype;
         }
-        setState(parsed);
+        setState(parsed); // eslint-disable-line react-hooks/set-state-in-effect
       }
     } catch {
       // ignore parse errors

@@ -121,7 +121,7 @@ export default function TokensPage() {
     const setter = set === "bar" ? setBarHidden : setAreaHidden;
     setter((prev) => {
       const next = new Set(prev);
-      next.has(dataKey) ? next.delete(dataKey) : next.add(dataKey);
+      if (next.has(dataKey)) { next.delete(dataKey); } else { next.add(dataKey); }
       return next;
     });
   }, []);

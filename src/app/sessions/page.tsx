@@ -87,7 +87,7 @@ export default function SessionsPage() {
   const toggleSelect = (pid: number) => {
     setSelectedPids((prev) => {
       const next = new Set(prev);
-      next.has(pid) ? next.delete(pid) : next.add(pid);
+      if (next.has(pid)) { next.delete(pid); } else { next.add(pid); }
       return next;
     });
   };
