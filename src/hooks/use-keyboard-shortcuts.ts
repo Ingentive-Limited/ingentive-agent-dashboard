@@ -11,11 +11,12 @@ const NAV_ROUTES = [
   "/tokens",    // ⌘5
   "/history",   // ⌘6
   "/tasks",     // ⌘7
+  "/plugins",   // ⌘8
 ];
 
 /**
  * Global keyboard shortcuts:
- * - ⌘/Ctrl + 1-7: Navigate to pages
+ * - ⌘/Ctrl + 1-8: Navigate to pages
  * - ⌘/Ctrl + K: Open search (handled by search-dialog.tsx)
  * - Escape: Go back
  */
@@ -37,7 +38,7 @@ export function useKeyboardShortcuts() {
       }
 
       // ⌘/Ctrl + 1-7: Navigate to pages
-      if (meta && e.key >= "1" && e.key <= "7") {
+      if (meta && e.key >= "1" && e.key <= "8") {
         const index = parseInt(e.key, 10) - 1;
         if (index < NAV_ROUTES.length) {
           e.preventDefault();

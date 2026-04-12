@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import readline from "readline";
+import { execFileSync } from "child_process";
 import type {
   ClaudeSession,
   SessionStatus,
@@ -19,6 +20,8 @@ import type {
   SearchResult,
   DailyTokenUsage,
   ProjectStats,
+  InstalledPlugin,
+  SystemStatus,
 } from "./types";
 
 // Anthropic pricing per million tokens (Sonnet 4 as default)
@@ -1380,4 +1383,75 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
   return stats.sort(
     (a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
   );
+}
+
+/**
+ * Read installed plugins from ~/.claude/plugins/installed_plugins.json
+ */
+export async function getInstalledPlugins(): Promise<InstalledPlugin[]> {
+  const pluginsFile = path.join(CLAUDE_DIR, "plugins", "installed_plugins.json");
+  if (!fs.existsSync(pluginsFile)) return [];
+
+  try {
+    const raw = await fs.promises.readFile(pluginsFile, "utf-8");
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== "object" || !data.plugins) return [];
+
+    const plugins: InstalledPlugin[] = [];
+    for (const [key, entries] of Object.entries(data.plugins)) {
+      if (!Array.isArray(entries) || entries.length === 0) continue;
+      const entry = entries[0] as Record<string, unknown>;
+      const [pluginName, marketplace] = key.split("@");
+      plugins.push({
+        name: pluginName || key,
+        marketplace: marketplace || "unknown",
+        scope: entry.scope === "project" ? "project" : "user",
+        version: typeof entry.version === "string" ? entry.version : "unknown",
+        installedAt: typeof entry.installedAt === "string" ? entry.installedAt : "",
+        lastUpdated: typeof entry.lastUpdated === "string" ? entry.lastUpdated : "",
+      });
+    }
+
+    return plugins.sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get system status: CLI version, active session count, API reachability.
+ */
+export async function getSystemStatus(): Promise<SystemStatus> {
+  let cliVersion = "unknown";
+  try {
+    cliVersion = execFileSync("claude", ["--version"], {
+      timeout: 3000,
+      encoding: "utf-8",
+    }).trim();
+  } catch {
+    // CLI not installed or not in PATH
+  }
+
+  const sessions = await getActiveSessions();
+  const activeSessions = sessions.filter((s) => s.isAlive).length;
+
+  // Quick check of Anthropic API status page
+  let apiStatus: "operational" | "degraded" | "unknown" = "unknown";
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch("https://status.anthropic.com/api/v2/status.json", {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const json = await res.json();
+      const indicator = json?.status?.indicator;
+      apiStatus = indicator === "none" ? "operational" : "degraded";
+    }
+  } catch {
+    // Network error or timeout
+  }
+
+  return { cliVersion, activeSessions, apiStatus };
 }

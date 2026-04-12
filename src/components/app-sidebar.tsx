@@ -10,6 +10,7 @@ import {
   BarChart3,
   Clock,
   History,
+  Puzzle,
 } from "lucide-react";
 import {
   Sidebar,
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SystemStatusBar } from "@/components/system-status-bar";
 const monitorLinks = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, shortcut: "⌘1" },
   { href: "/sessions", label: "Sessions", icon: Terminal, shortcut: "⌘2" },
@@ -39,6 +41,7 @@ const analyticsLinks = [
 
 const automationLinks = [
   { href: "/tasks", label: "Scheduled Tasks", icon: Clock, shortcut: "⌘7" },
+  { href: "/plugins", label: "Plugins", icon: Puzzle, shortcut: "⌘8" },
 ];
 
 function NavGroup({
@@ -96,10 +99,13 @@ export function AppSidebar() {
         <NavGroup label="Analytics" links={analyticsLinks} isActive={isActive} />
         <NavGroup label="Automation" links={automationLinks} isActive={isActive} />
       </SidebarContent>
-      <SidebarFooter className="px-3 py-2">
+      <SidebarFooter className="px-3 py-2 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Theme</span>
           <ThemeToggle />
+        </div>
+        <div className="border-t pt-2">
+          <SystemStatusBar />
         </div>
       </SidebarFooter>
     </Sidebar>

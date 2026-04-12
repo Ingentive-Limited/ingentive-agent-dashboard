@@ -265,11 +265,12 @@ export default function AwaitingPage() {
 
       {!awaitingSessions || awaitingSessions.length === 0 ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <Bell className="h-12 w-12 text-muted-foreground/30 mb-4" aria-hidden="true" />
-            <p className="text-muted-foreground">No sessions awaiting input</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              You&apos;ll be notified when a session needs your attention
+            <p className="text-muted-foreground font-medium">No sessions awaiting input</p>
+            <p className="text-sm text-muted-foreground mt-2 max-w-md">
+              You&apos;ll be notified when a session needs your attention.
+              Sessions appear here when Claude finishes a turn and is waiting for your response.
             </p>
           </CardContent>
         </Card>

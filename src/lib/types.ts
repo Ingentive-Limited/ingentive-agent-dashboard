@@ -138,6 +138,21 @@ export interface ProjectStats {
   errorRate: number;
 }
 
+export interface InstalledPlugin {
+  name: string;
+  marketplace: string;
+  scope: "user" | "project";
+  version: string;
+  installedAt: string;
+  lastUpdated: string;
+}
+
+export interface SystemStatus {
+  cliVersion: string;
+  activeSessions: number;
+  apiStatus: "operational" | "degraded" | "unknown";
+}
+
 export interface DashboardOverview {
   activeSessions: number;
   awaitingInput: number;

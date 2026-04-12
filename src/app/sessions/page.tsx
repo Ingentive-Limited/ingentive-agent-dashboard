@@ -16,8 +16,9 @@ import {
 } from "@/components/ui/table";
 import { formatDuration } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/types";
-import { ExternalLink, Square, MessageSquare, CheckSquare, XSquare } from "lucide-react";
+import { ExternalLink, Square, MessageSquare, CheckSquare, XSquare, Terminal } from "lucide-react";
 import { ConversationViewer } from "@/components/conversation-viewer";
+import { EmptyState } from "@/components/empty-state";
 
 function openSession(session: ClaudeSession) {
   fetch("/api/sessions/open", {
@@ -185,8 +186,13 @@ export default function SessionsPage() {
           <TableBody>
             {sessions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  No sessions found
+                <TableCell colSpan={8} className="p-0">
+                  <EmptyState
+                    icon={Terminal}
+                    title="No active sessions"
+                    description="Start a Claude session in any project directory to see it here."
+                    command="claude"
+                  />
                 </TableCell>
               </TableRow>
             ) : (

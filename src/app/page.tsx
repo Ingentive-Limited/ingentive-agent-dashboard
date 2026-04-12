@@ -210,7 +210,7 @@ export default function DashboardPage() {
         <CardContent>
           <div aria-live="polite">
             {awaitingSessions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No sessions awaiting input</p>
+              <p className="text-sm text-muted-foreground">All clear &mdash; no sessions waiting for your response</p>
             ) : (
               <div className="space-y-3">
                 {awaitingSessions.map((session) => (
@@ -277,7 +277,9 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {nonAwaitingSessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No other active sessions</p>
+            <p className="text-sm text-muted-foreground">
+              No active sessions. Run <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">claude</code> in a project directory to start one.
+            </p>
           ) : (
             <div className="space-y-3">
               {nonAwaitingSessions.map((session) => (

@@ -24,6 +24,7 @@ import {
   Star,
 } from "lucide-react";
 import { useFavorites } from "@/hooks/use-favorites";
+import { EmptyState } from "@/components/empty-state";
 
 type SortKey = "name" | "activity" | "tokens" | "cost" | "sessions" | "errors";
 type GroupMode = "none" | "directory";
@@ -460,12 +461,12 @@ export default function ProjectsPage() {
       )}
 
       {projects.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <FolderOpen className="h-12 w-12 text-muted-foreground/30 mb-4" />
-            <p className="text-muted-foreground">No projects found</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={FolderOpen}
+          title="No projects found"
+          description="Start a Claude session in any project directory to see it here. Each directory where you use Claude becomes a tracked project."
+          command="cd your-project && claude"
+        />
       ) : grouped ? (
         <div className="space-y-6">
           {grouped.map(([dir, dirProjects]) => (

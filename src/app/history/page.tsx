@@ -20,6 +20,7 @@ import { formatDuration, formatTokens, formatCost, formatRelativeTime } from "@/
 import type { SessionHistory, ConversationMessage } from "@/lib/types";
 import { ChevronDown, ChevronRight, History, AlertCircle, Download } from "lucide-react";
 import { exportCSV, exportJSON } from "@/lib/export";
+import { EmptyState } from "@/components/empty-state";
 
 function ConversationPreview({ sessionId }: { sessionId: string }) {
   const { data: messages } = usePolling<ConversationMessage[]>(
@@ -186,12 +187,12 @@ export default function HistoryPage() {
       </div>
 
       {history.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <History className="h-12 w-12 text-muted-foreground/30 mb-4" aria-hidden="true" />
-            <p className="text-muted-foreground">No session history found</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={History}
+          title="No session history found"
+          description="Session history will appear here after you start using Claude. Each conversation is tracked with token usage and duration."
+          command="claude"
+        />
       ) : (
         <div className="rounded-lg border">
           <Table aria-label="Session history">

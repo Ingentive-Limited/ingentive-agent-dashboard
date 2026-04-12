@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Clock, FolderOpen } from "lucide-react";
 import type { ScheduledTask } from "@/lib/types";
+import { EmptyState } from "@/components/empty-state";
 
 export default function TasksPage() {
   const { data: tasks, isLoading } = usePolling<ScheduledTask[]>(
@@ -40,15 +41,12 @@ export default function TasksPage() {
       </div>
 
       {!tasks || tasks.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Clock className="h-12 w-12 text-muted-foreground/30 mb-4" />
-            <p className="text-muted-foreground">No scheduled tasks</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Use CronCreate or the scheduled-tasks tool to create tasks
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Clock}
+          title="No scheduled tasks"
+          description="Create scheduled tasks to automate recurring Claude workflows. Tasks run on a cron schedule in your projects."
+          command="claude /schedule"
+        />
       ) : (
         <div className="space-y-6">
           {Array.from(grouped.entries()).map(([project, projectTasks]) => (
