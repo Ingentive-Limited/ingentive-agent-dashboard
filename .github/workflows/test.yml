@@ -38,6 +38,9 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      - name: Seed ~/.claude/ with fixture data
+        run: bash e2e/seed-claude-data.sh
+
       - name: Run Playwright tests
         run: npm run test:e2e
 

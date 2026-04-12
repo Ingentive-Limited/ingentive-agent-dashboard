@@ -18,23 +18,15 @@ test.describe("Dashboard", () => {
 
   test("shows awaiting input section after load", async ({ page }) => {
     await page.goto("/");
-    // Wait for loading skeleton to disappear — in CI the API may fail,
-    // leaving the page in permanent loading state, which is acceptable
-    const loaded = await page.waitForSelector('[role="status"]', { state: "detached", timeout: 15000 }).then(() => true).catch(() => false);
-    if (loaded) {
-      await expect(page.getByText("Awaiting Input")).toBeVisible({ timeout: 5000 });
-    }
-    // If data never loaded, that's OK in CI — the loading state itself is valid
-    expect(true).toBe(true);
+    // ~/.claude/ is seeded with fixture data in CI, so loading should complete
+    await page.waitForSelector('[role="status"]', { state: "detached", timeout: 15000 }).catch(() => {});
+    await expect(page.getByText("Awaiting Input")).toBeVisible({ timeout: 15000 });
   });
 
   test("shows active sessions section after load", async ({ page }) => {
     await page.goto("/");
-    const loaded = await page.waitForSelector('[role="status"]', { state: "detached", timeout: 15000 }).then(() => true).catch(() => false);
-    if (loaded) {
-      await expect(page.getByText("Active Sessions")).toBeVisible({ timeout: 5000 });
-    }
-    expect(true).toBe(true);
+    await page.waitForSelector('[role="status"]', { state: "detached", timeout: 15000 }).catch(() => {});
+    await expect(page.getByText("Active Sessions")).toBeVisible({ timeout: 15000 });
   });
 
   test("has billing mode toggle", async ({ page }) => {
