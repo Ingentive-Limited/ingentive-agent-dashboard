@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { usePolling } from "@/hooks/use-polling";
+import { useBillingMode } from "@/hooks/use-billing-mode";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,7 @@ function parentDir(p: string): string {
   return parts.slice(0, -1).join("/");
 }
 
-function ProjectCard({ project }: { project: ProjectSummary }) {
+function ProjectCard({ project, showCost }: { project: ProjectSummary; showCost: boolean }) {
   const totalTokens = project.totalTokens.input_tokens + project.totalTokens.output_tokens;
   return (
     <Link href={`/projects/${encodeURIComponent(project.id)}`}>
@@ -49,10 +50,12 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
                 <BarChart3 className="h-3 w-3" />
                 {formatTokens(totalTokens)} tokens
               </span>
-              <span className="flex items-center gap-1">
-                <DollarSign className="h-3 w-3" />
-                {formatCost(project.cost.totalCost)}
-              </span>
+              {showCost && (
+                <span className="flex items-center gap-1">
+                  <DollarSign className="h-3 w-3" />
+                  {formatCost(project.cost.totalCost)}
+                </span>
+              )}
             </div>
           </div>
         </CardContent>
@@ -68,6 +71,7 @@ export default function ProjectsPage() {
   );
   const [sortKey, setSortKey] = useState<SortKey>("activity");
   const [groupMode, setGroupMode] = useState<GroupMode>("none");
+  const { isApi } = useBillingMode();
 
   const sorted = useMemo(() => {
     if (!projects) return [];
@@ -123,7 +127,7 @@ export default function ProjectsPage() {
     { key: "activity", label: "Recent" },
     { key: "name", label: "Name" },
     { key: "tokens", label: "Tokens" },
-    { key: "cost", label: "Cost" },
+    ...(isApi ? [{ key: "cost" as SortKey, label: "Cost" }] : []),
     { key: "sessions", label: "Sessions" },
   ];
 
@@ -183,7 +187,7 @@ export default function ProjectsPage() {
               </h3>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {dirProjects.map((project) => (
-                  <ProjectCard key={project.id} project={project} />
+                  <ProjectCard key={project.id} project={project} showCost={isApi} />
                 ))}
               </div>
             </div>
@@ -192,7 +196,7 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {sorted.map((project) => (
-            <ProjectCard key={project.id} project={project} />
+            <ProjectCard key={project.id} project={project} showCost={isApi} />
           ))}
         </div>
       )}

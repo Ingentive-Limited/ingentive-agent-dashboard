@@ -2,6 +2,7 @@
 
 import { usePolling } from "@/hooks/use-polling";
 import { useAwaitingNotifications } from "@/hooks/use-notifications";
+import { useBillingMode } from "@/hooks/use-billing-mode";
 import { OverviewCards } from "@/components/overview-cards";
 import { TokenChart } from "@/components/token-chart";
 import { StatusBadge } from "@/components/status-badge";
@@ -12,7 +13,7 @@ import { formatDuration } from "@/lib/utils";
 import type { DashboardOverview, ClaudeSession } from "@/lib/types";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, Bell, ArrowRight } from "lucide-react";
+import { ExternalLink, Bell, ArrowRight, CreditCard, Key } from "lucide-react";
 
 function openSession(session: ClaudeSession) {
   fetch("/api/sessions/open", {
@@ -63,6 +64,7 @@ function SessionRow({ session }: { session: ClaudeSession }) {
 
 export default function DashboardPage() {
   const { data, isLoading } = usePolling<DashboardOverview>("/api/overview", 5000);
+  const { mode, toggle, isApi } = useBillingMode();
 
   useAwaitingNotifications(data?.recentSessions);
 
@@ -84,30 +86,60 @@ export default function DashboardPage() {
     (s) => s.status === "awaiting_input" || s.status === "needs_attention"
   );
 
+  const nonAwaitingSessions = data.recentSessions.filter(
+    (s) => s.status !== "awaiting_input" && s.status !== "needs_attention"
+  );
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
-      <OverviewCards data={data} />
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 text-xs"
+          onClick={toggle}
+          title={isApi ? "Using API tokens (costs tracked)" : "Using subscription (no token costs)"}
+        >
+          {isApi ? (
+            <>
+              <Key className="h-3.5 w-3.5" />
+              API
+            </>
+          ) : (
+            <>
+              <CreditCard className="h-3.5 w-3.5" />
+              Subscription
+            </>
+          )}
+        </Button>
+      </div>
 
-      {awaitingSessions.length > 0 && (
-        <Card className="border-amber-500/50">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Bell className="h-4 w-4 text-amber-500" />
-                <CardTitle className="text-lg">Awaiting Input</CardTitle>
+      <OverviewCards data={data} showCost={isApi} />
+
+      <Card className={awaitingSessions.length > 0 ? "border-amber-500/50" : ""}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bell className={`h-4 w-4 ${awaitingSessions.length > 0 ? "text-amber-500" : "text-muted-foreground"}`} />
+              <CardTitle className="text-lg">Awaiting Input</CardTitle>
+              {awaitingSessions.length > 0 && (
                 <Badge variant="secondary" className="text-xs">
                   {awaitingSessions.length}
                 </Badge>
-              </div>
-              <Link href="/awaiting">
-                <Button variant="ghost" size="sm" className="gap-1 text-xs">
-                  View all <ArrowRight className="h-3 w-3" />
-                </Button>
-              </Link>
+              )}
             </div>
-          </CardHeader>
-          <CardContent>
+            <Link href="/awaiting">
+              <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                View all <ArrowRight className="h-3 w-3" />
+              </Button>
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {awaitingSessions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No sessions awaiting input</p>
+          ) : (
             <div className="space-y-3">
               {awaitingSessions.map((session) => (
                 <div key={`awaiting-${session.sessionId}`} className="space-y-2">
@@ -138,28 +170,22 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Active Sessions</CardTitle>
         </CardHeader>
         <CardContent>
-          {data.recentSessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No active sessions</p>
+          {nonAwaitingSessions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No other active sessions</p>
           ) : (
             <div className="space-y-3">
-              {data.recentSessions
-                .filter(
-                  (s) =>
-                    awaitingSessions.length === 0 ||
-                    !awaitingSessions.some((a) => a.sessionId === s.sessionId)
-                )
-                .map((session) => (
-                  <SessionRow key={`active-${session.sessionId}`} session={session} />
-                ))}
+              {nonAwaitingSessions.map((session) => (
+                <SessionRow key={`active-${session.sessionId}`} session={session} />
+              ))}
             </div>
           )}
           {data.recentSessions.length > 0 && (

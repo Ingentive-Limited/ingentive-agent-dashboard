@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { usePolling } from "@/hooks/use-polling";
+import { useBillingMode } from "@/hooks/use-billing-mode";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -98,6 +99,7 @@ export default function HistoryPage() {
     15000
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { isApi } = useBillingMode();
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
@@ -144,7 +146,7 @@ export default function HistoryPage() {
                 <TableHead>Duration</TableHead>
                 <TableHead>Messages</TableHead>
                 <TableHead>Tokens</TableHead>
-                <TableHead>Cost</TableHead>
+                {isApi && <TableHead>Cost</TableHead>}
                 <TableHead>Entrypoint</TableHead>
               </TableRow>
             </TableHeader>
@@ -183,9 +185,11 @@ export default function HistoryPage() {
                           session.totalTokens.output_tokens
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {formatCost(session.cost.totalCost)}
-                    </TableCell>
+                    {isApi && (
+                      <TableCell className="font-mono text-sm">
+                        {formatCost(session.cost.totalCost)}
+                      </TableCell>
+                    )}
                     <TableCell>
                       <Badge variant="secondary" className="text-xs">
                         {session.entrypoint === "claude-desktop" ? "Desktop" : "CLI"}
@@ -194,7 +198,7 @@ export default function HistoryPage() {
                   </TableRow>
                   {expanded.has(session.sessionId) && (
                     <TableRow key={`preview-${session.sessionId}`}>
-                      <TableCell colSpan={8} className="p-0">
+                      <TableCell colSpan={isApi ? 8 : 7} className="p-0">
                         <ConversationPreview sessionId={session.sessionId} />
                       </TableCell>
                     </TableRow>
