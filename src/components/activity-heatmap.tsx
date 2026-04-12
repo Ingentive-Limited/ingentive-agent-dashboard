@@ -94,11 +94,17 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
       weeks.push(currentWeek);
     }
 
-    // Filter out month labels that are too close together (< 3 weeks apart)
-    const filteredMonths: typeof monthLabels = [];
-    for (const m of monthLabels) {
+    // Skip the very first month label if it starts at week 0 — it's always
+    // a partial month at the leading edge and its label crowds the next one.
+    // Then deduplicate any remaining labels closer than 2 weeks apart.
+    const trimmed = monthLabels.length > 1 && monthLabels[0].weekIndex === 0
+      ? monthLabels.slice(1)
+      : monthLabels;
+
+    const filteredMonths: typeof trimmed = [];
+    for (const m of trimmed) {
       const prev = filteredMonths[filteredMonths.length - 1];
-      if (!prev || m.weekIndex - prev.weekIndex >= 3) {
+      if (!prev || m.weekIndex - prev.weekIndex >= 2) {
         filteredMonths.push(m);
       }
     }
