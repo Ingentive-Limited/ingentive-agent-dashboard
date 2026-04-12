@@ -4,7 +4,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { Separator } from "@/components/ui/separator";
+
 
 const roboto = Roboto({
   variable: "--font-roboto",

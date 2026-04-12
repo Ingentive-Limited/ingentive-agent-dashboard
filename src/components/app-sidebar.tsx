@@ -24,8 +24,6 @@ import {
 } from "@/components/ui/sidebar";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Separator } from "@/components/ui/separator";
-
 const monitorLinks = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/sessions", label: "Sessions", icon: Terminal },

@@ -7,7 +7,7 @@ export async function GET() {
   try {
     const tasks = await getScheduledTasks();
     return NextResponse.json(tasks);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: "Failed to fetch tasks" },
       { status: 500 }

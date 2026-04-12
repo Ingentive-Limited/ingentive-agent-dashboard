@@ -15,7 +15,25 @@ import type {
   DashboardOverview,
 } from "./types";
 
+const IS_WIN = process.platform === "win32";
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
+
+/**
+ * Get the Claude Desktop app data directory (platform-specific).
+ * macOS:   ~/Library/Application Support/Claude/
+ * Windows: %APPDATA%/Claude/
+ * Linux:   ~/.config/Claude/
+ */
+function getClaudeAppDataDir(): string {
+  if (IS_WIN) {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Claude");
+  }
+  if (process.platform === "linux") {
+    return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "Claude");
+  }
+  // macOS
+  return path.join(os.homedir(), "Library", "Application Support", "Claude");
+}
 
 function emptyTokenUsage(): TokenUsage {
   return {
@@ -70,7 +88,8 @@ async function buildProjectPathCache(): Promise<Map<string, string>> {
         );
         const data = JSON.parse(content);
         if (data.cwd) {
-          const encoded = data.cwd.replace(/\//g, "-");
+          // Encode path: replace both / and \ with -
+          const encoded = data.cwd.replace(/[\\/]/g, "-");
           projectPathCache.set(encoded, data.cwd);
         }
       } catch {
@@ -110,12 +129,18 @@ async function buildProjectPathCache(): Promise<Map<string, string>> {
 }
 
 function decodeProjectPath(dirName: string): string {
-  // Fallback: replace leading - with / and remaining - with /
+  // Fallback: replace leading - with / (or \ on Windows) and remaining - with separator
+  const sep = path.sep;
+  if (IS_WIN) {
+    // Windows encoded paths start with -C- or similar (C:\...)
+    return dirName.replace(/-/g, sep);
+  }
   return dirName.replace(/^-/, "/").replace(/-/g, "/");
 }
 
 function projectNameFromPath(p: string): string {
-  const parts = p.split("/").filter(Boolean);
+  // Split on both / and \ for cross-platform support
+  const parts = p.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || p;
 }
 
@@ -266,9 +291,8 @@ export async function getProjects(): Promise<ProjectSummary[]> {
   const projectsDir = path.join(CLAUDE_DIR, "projects");
   if (!fs.existsSync(projectsDir)) return [];
 
-  const dirs = fs.readdirSync(projectsDir).filter((d) => {
-    return fs.statSync(path.join(projectsDir, d)).isDirectory();
-  });
+  const allEntries = await fs.promises.readdir(projectsDir, { withFileTypes: true });
+  const dirs = allEntries.filter((d) => d.isDirectory()).map((d) => d.name);
 
   const projects: ProjectSummary[] = [];
 
@@ -277,29 +301,30 @@ export async function getProjects(): Promise<ProjectSummary[]> {
 
   for (const dir of dirs) {
     const projectPath = path.join(projectsDir, dir);
-    const jsonlFiles = fs.readdirSync(projectPath).filter((f) =>
-      f.endsWith(".jsonl")
-    );
+    const projEntries = await fs.promises.readdir(projectPath);
+    const jsonlFiles = projEntries.filter((f) => f.endsWith(".jsonl"));
 
     let lastActivity = "";
     let totalTokens = emptyTokenUsage();
 
     // Quick scan: get last activity from file mtime
-    for (const jsonl of jsonlFiles) {
-      const stat = fs.statSync(path.join(projectPath, jsonl));
-      const mtime = stat.mtime.toISOString();
-      if (!lastActivity || mtime > lastActivity) {
-        lastActivity = mtime;
+    const fileStats = await Promise.all(
+      jsonlFiles.map(async (f) => {
+        const stat = await fs.promises.stat(path.join(projectPath, f));
+        return { name: f, mtime: stat.mtime };
+      })
+    );
+    for (const { mtime } of fileStats) {
+      const iso = mtime.toISOString();
+      if (!lastActivity || iso > lastActivity) {
+        lastActivity = iso;
       }
     }
 
     // Light token scan: read last 50 lines of most recent jsonl
-    if (jsonlFiles.length > 0) {
-      const sortedFiles = jsonlFiles
-        .map((f) => ({
-          name: f,
-          mtime: fs.statSync(path.join(projectPath, f)).mtimeMs,
-        }))
+    if (fileStats.length > 0) {
+      const sortedFiles = fileStats
+        .map((f) => ({ name: f.name, mtime: f.mtime.getTime() }))
         .sort((a, b) => b.mtime - a.mtime);
 
       try {
@@ -499,10 +524,7 @@ export async function getScheduledTasks(): Promise<ScheduledTask[]> {
 
   // 1. Check Claude Desktop local-agent-mode-sessions for scheduled-tasks.json
   const claudeAppSupport = path.join(
-    os.homedir(),
-    "Library",
-    "Application Support",
-    "Claude",
+    getClaudeAppDataDir(),
     "local-agent-mode-sessions"
   );
   if (fs.existsSync(claudeAppSupport)) {

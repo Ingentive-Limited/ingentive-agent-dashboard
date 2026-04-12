@@ -7,7 +7,7 @@ export async function GET() {
   try {
     const sessions = await getActiveSessions();
     return NextResponse.json(sessions);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: "Failed to fetch sessions" },
       { status: 500 }
