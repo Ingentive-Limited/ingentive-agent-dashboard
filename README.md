@@ -1,6 +1,6 @@
 # Ingentive Agent OS
 
-A local management dashboard for monitoring and interacting with your active Claude Code sessions, projects, token usage, and scheduled tasks.
+A local management dashboard for monitoring and interacting with your active Claude Code sessions, projects, token usage, and scheduled tasks. Works on macOS, Windows, and Linux.
 
 Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Claude Desktop app storage to give you real-time visibility into everything Claude is doing on your machine.
 
@@ -13,7 +13,7 @@ Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Clau
 - **Project Detail** - Per-project view with session history, token usage charts, subagents, and memory files
 - **Token Usage** - Stacked charts showing input/output/cache token breakdown per project
 - **Scheduled Tasks** - All scheduled tasks grouped by project, pulled from Claude Desktop
-- **Session Interaction** - Click any session to open it directly in Terminal via `claude -r`
+- **Session Interaction** - Click any session to open it directly in your terminal via `claude -r`
 - **Dark/Light Mode** - Full theme support with the Ingentive brand
 
 ## Tech Stack
@@ -28,7 +28,17 @@ Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Clau
 
 - Node.js 18+
 - npm
-- Claude Code or Claude Desktop installed (data is read from `~/.claude/` and `~/Library/Application Support/Claude/`)
+- Claude Code or Claude Desktop installed
+
+## Platform Support
+
+Ingentive Agent OS supports macOS, Windows, and Linux. Session data is read from platform-appropriate locations, and clicking a session opens it in the native terminal for each OS.
+
+| Platform | Claude data directory | App data directory | Terminal |
+|----------|----------------------|--------------------|----------|
+| macOS | `~/.claude/` | `~/Library/Application Support/Claude/` | Terminal.app |
+| Windows | `%USERPROFILE%\.claude\` | `%APPDATA%\Claude\` | cmd.exe |
+| Linux | `~/.claude/` | `$XDG_CONFIG_HOME/Claude/` (default: `~/.config/Claude/`) | gnome-terminal, konsole, or xterm |
 
 ## Getting Started
 
@@ -63,8 +73,8 @@ All data is read server-side from the local filesystem. No external APIs or data
 | Sessions | `~/.claude/sessions/*.json` | Active session PIDs, working directories, entrypoints |
 | Conversations | `~/.claude/projects/<encoded-path>/*.jsonl` | Token usage, session status, message history |
 | Subagents | `~/.claude/projects/.../subagents/agent-*.meta.json` | Agent types and descriptions |
-| Scheduled Tasks | `~/Library/Application Support/Claude/local-agent-mode-sessions/**/scheduled-tasks.json` | Task definitions, schedules, last run times |
-| Task Definitions | `~/Documents/Claude/Scheduled/*/SKILL.md` | Task descriptions and prompts |
+| Scheduled Tasks | `<app-data-dir>/local-agent-mode-sessions/**/scheduled-tasks.json` | Task definitions, schedules, last run times |
+| Task Definitions | Referenced via `filePath` in scheduled-tasks.json | Task descriptions and prompts |
 
 ## Session Status Detection
 
