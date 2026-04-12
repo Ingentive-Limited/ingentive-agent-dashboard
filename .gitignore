@@ -40,6 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# claude session files
+# claude
 .claude/
 *.jsonl
+CLAUDE.md
+AGENTS.md
