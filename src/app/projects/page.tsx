@@ -21,7 +21,9 @@ import {
   CheckCircle2,
   GitCompare,
   X,
+  Star,
 } from "lucide-react";
+import { useFavorites } from "@/hooks/use-favorites";
 
 type SortKey = "name" | "activity" | "tokens" | "cost" | "sessions" | "errors";
 type GroupMode = "none" | "directory";
@@ -54,20 +56,48 @@ function ProjectCard({
   selected,
   onSelect,
   compareMode,
+  isFavorite,
+  onToggleFavorite,
 }: {
   project: ProjectStats;
   showCost: boolean;
   selected: boolean;
   onSelect: () => void;
   compareMode: boolean;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
 }) {
   const totalTokens = project.totalTokens.input_tokens + project.totalTokens.output_tokens;
+
+  const handleFavoriteClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onToggleFavorite();
+  };
 
   const cardContent = (
     <Card className={`hover:bg-muted/50 transition-colors cursor-pointer h-full ${selected ? "ring-2 ring-primary" : ""}`}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base truncate">{project.name}</CardTitle>
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={handleFavoriteClick}
+              className="shrink-0 hover:scale-110 transition-transform"
+              aria-label={isFavorite ? `Unpin ${project.name}` : `Pin ${project.name}`}
+              title={isFavorite ? "Unpin project" : "Pin project"}
+            >
+              <Star
+                className={`h-4 w-4 ${
+                  isFavorite
+                    ? "fill-amber-400 text-amber-400"
+                    : "text-muted-foreground/30 hover:text-amber-400/60"
+                }`}
+                aria-hidden="true"
+              />
+            </button>
+            <CardTitle className="text-base truncate">{project.name}</CardTitle>
+          </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <ErrorRateBadge
               errorRate={project.errorRate}
@@ -246,11 +276,17 @@ export default function ProjectsPage() {
   const [compareMode, setCompareMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const { isApi } = useBillingMode();
+  const { favoriteIds, isFavorite, toggleFavorite } = useFavorites();
 
   const sorted = useMemo(() => {
     if (!projects) return [];
     const copy = [...projects];
     copy.sort((a, b) => {
+      // Pinned projects always come first
+      const aFav = favoriteIds.includes(a.id) ? 1 : 0;
+      const bFav = favoriteIds.includes(b.id) ? 1 : 0;
+      if (aFav !== bFav) return bFav - aFav;
+
       switch (sortKey) {
         case "name":
           return a.name.localeCompare(b.name);
@@ -273,7 +309,7 @@ export default function ProjectsPage() {
       }
     });
     return copy;
-  }, [projects, sortKey]);
+  }, [projects, sortKey, favoriteIds]);
 
   const grouped = useMemo(() => {
     if (groupMode === "none") return null;
@@ -428,6 +464,8 @@ export default function ProjectsPage() {
                     selected={selectedIds.has(project.id)}
                     onSelect={() => toggleSelect(project.id)}
                     compareMode={compareMode}
+                    isFavorite={isFavorite(project.id)}
+                    onToggleFavorite={() => toggleFavorite(project.id)}
                   />
                 ))}
               </div>
@@ -444,6 +482,8 @@ export default function ProjectsPage() {
               selected={selectedIds.has(project.id)}
               onSelect={() => toggleSelect(project.id)}
               compareMode={compareMode}
+              isFavorite={isFavorite(project.id)}
+              onToggleFavorite={() => toggleFavorite(project.id)}
             />
           ))}
         </div>
