@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/table";
 import { formatDuration } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/types";
-import { ExternalLink, Square, MessageSquare } from "lucide-react";
+import { ExternalLink, Square, MessageSquare, CheckSquare, XSquare } from "lucide-react";
 import { ConversationViewer } from "@/components/conversation-viewer";
 
 function openSession(session: ClaudeSession) {
@@ -46,11 +46,16 @@ export default function SessionsPage() {
   );
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
   const [viewingSession, setViewingSession] = useState<ClaudeSession | null>(null);
+  const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set());
+
+  const aliveSessions = useMemo(
+    () => (sessions || []).filter((s) => s.isAlive),
+    [sessions]
+  );
 
   const handleKill = async (pid: number) => {
     setKillingPids((prev) => new Set(prev).add(pid));
     await killSession(pid);
-    // Wait a moment for the process to die, then the next poll will update
     setTimeout(() => {
       setKillingPids((prev) => {
         const next = new Set(prev);
@@ -58,6 +63,40 @@ export default function SessionsPage() {
         return next;
       });
     }, 2000);
+  };
+
+  const handleBulkKill = async () => {
+    const pids = Array.from(selectedPids);
+    setKillingPids((prev) => {
+      const next = new Set(prev);
+      pids.forEach((p) => next.add(p));
+      return next;
+    });
+    await Promise.all(pids.map((pid) => killSession(pid)));
+    setTimeout(() => {
+      setKillingPids((prev) => {
+        const next = new Set(prev);
+        pids.forEach((p) => next.delete(p));
+        return next;
+      });
+      setSelectedPids(new Set());
+    }, 2000);
+  };
+
+  const toggleSelect = (pid: number) => {
+    setSelectedPids((prev) => {
+      const next = new Set(prev);
+      next.has(pid) ? next.delete(pid) : next.add(pid);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (selectedPids.size === aliveSessions.length) {
+      setSelectedPids(new Set());
+    } else {
+      setSelectedPids(new Set(aliveSessions.map((s) => s.pid)));
+    }
   };
 
   if (isLoading || !sessions) {
@@ -69,19 +108,65 @@ export default function SessionsPage() {
     );
   }
 
+  const hasSelection = selectedPids.size > 0;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Sessions</h1>
         <span className="text-sm text-muted-foreground">
-          {sessions.filter((s) => s.isAlive).length} active
+          {aliveSessions.length} active
         </span>
       </div>
+
+      {/* Bulk action bar */}
+      {hasSelection && (
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/50 px-4 py-2">
+          <span className="text-sm font-medium">
+            {selectedPids.size} selected
+          </span>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="gap-1.5"
+            onClick={handleBulkKill}
+            disabled={killingPids.size > 0}
+          >
+            <XSquare className="h-3.5 w-3.5" aria-hidden="true" />
+            Stop selected
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelectedPids(new Set())}
+          >
+            Clear selection
+          </Button>
+        </div>
+      )}
 
       <div className="rounded-lg border">
         <Table aria-label="Active sessions">
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                {aliveSessions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={selectAll}
+                    className="flex items-center justify-center"
+                    aria-label={selectedPids.size === aliveSessions.length ? "Deselect all" : "Select all"}
+                  >
+                    <CheckSquare
+                      className={`h-4 w-4 ${
+                        selectedPids.size === aliveSessions.length && aliveSessions.length > 0
+                          ? "text-primary"
+                          : "text-muted-foreground/40"
+                      }`}
+                    />
+                  </button>
+                )}
+              </TableHead>
               <TableHead>Status</TableHead>
               <TableHead>PID</TableHead>
               <TableHead>Project</TableHead>
@@ -94,13 +179,27 @@ export default function SessionsPage() {
           <TableBody>
             {sessions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   No sessions found
                 </TableCell>
               </TableRow>
             ) : (
               sessions.map((session) => (
-                <TableRow key={session.sessionId}>
+                <TableRow
+                  key={session.sessionId}
+                  className={selectedPids.has(session.pid) ? "bg-primary/5" : ""}
+                >
+                  <TableCell>
+                    {session.isAlive && (
+                      <input
+                        type="checkbox"
+                        checked={selectedPids.has(session.pid)}
+                        onChange={() => toggleSelect(session.pid)}
+                        className="accent-primary h-4 w-4"
+                        aria-label={`Select ${session.projectName} session`}
+                      />
+                    )}
+                  </TableCell>
                   <TableCell>
                     <StatusBadge status={session.status} />
                   </TableCell>
