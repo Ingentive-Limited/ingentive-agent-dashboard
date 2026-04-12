@@ -39,15 +39,16 @@ function NotificationSettings() {
         size="icon"
         className="h-8 w-8"
         onClick={() => setOpen(true)}
+        aria-label="Notification settings"
         title="Notification settings"
       >
-        <Settings2 className="h-4 w-4" />
+        <Settings2 className="h-4 w-4" aria-hidden="true" />
       </Button>
     );
   }
 
   return (
-    <Card className="absolute right-0 top-full mt-1 z-10 w-64">
+    <Card className="absolute right-0 top-full mt-1 z-10 w-64" role="dialog" aria-label="Notification settings">
       <CardContent className="p-3 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">Notification Settings</span>
@@ -158,12 +159,12 @@ export default function AwaitingPage() {
           >
             {notificationsActive ? (
               <>
-                <Bell className="h-4 w-4" />
+                <Bell className="h-4 w-4" aria-hidden="true" />
                 Notifications On
               </>
             ) : (
               <>
-                <BellOff className="h-4 w-4" />
+                <BellOff className="h-4 w-4" aria-hidden="true" />
                 {browserPermission === "denied"
                   ? "Notifications Blocked"
                   : browserPermission === "granted"
@@ -179,7 +180,7 @@ export default function AwaitingPage() {
       {!awaitingSessions || awaitingSessions.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <Bell className="h-12 w-12 text-muted-foreground/30 mb-4" />
+            <Bell className="h-12 w-12 text-muted-foreground/30 mb-4" aria-hidden="true" />
             <p className="text-muted-foreground">No sessions awaiting input</p>
             <p className="text-xs text-muted-foreground mt-1">
               You&apos;ll be notified when a session needs your attention
@@ -218,8 +219,9 @@ export default function AwaitingPage() {
                       size="sm"
                       className="gap-1.5"
                       onClick={() => openSession(session)}
+                      aria-label={`Resume ${session.projectName} session in terminal`}
                     >
-                      <ExternalLink className="h-3.5 w-3.5" />
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                       Resume
                     </Button>
                   </div>

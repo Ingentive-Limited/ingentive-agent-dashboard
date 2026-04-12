@@ -41,7 +41,7 @@ function ProjectCard({ project, showCost }: { project: ProjectSummary; showCost:
             </p>
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
-                <FileText className="h-3 w-3" />
+                <FileText className="h-3 w-3" aria-hidden="true" />
                 {project.lastActivity
                   ? formatRelativeTime(project.lastActivity)
                   : "No activity"}

@@ -61,7 +61,7 @@ function NavGroup({
                 isActive={isActive(link.href)}
                 render={<Link href={link.href} />}
               >
-                <link.icon className="h-4 w-4" />
+                <link.icon className="h-4 w-4" aria-hidden="true" />
                 <span>{link.label}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -81,7 +81,7 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar>
+    <Sidebar aria-label="Main navigation">
       <SidebarHeader className="py-2" style={{ paddingLeft: 16, paddingRight: 8 }}>
         <Logo className="-ml-0.5" />
         <p className="text-[10px] text-muted-foreground leading-none">Agent OS</p>

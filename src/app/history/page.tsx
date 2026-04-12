@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import { StatusBadge } from "@/components/status-badge";
@@ -30,17 +30,17 @@ function ConversationPreview({ sessionId }: { sessionId: string }) {
     0
   );
 
-  if (!messages) return <div className="p-4"><Skeleton className="h-20" /></div>;
+  if (!messages) return <div className="p-4" role="status"><Skeleton className="h-20" /><span className="sr-only">Loading conversation...</span></div>;
 
   return (
     <div className="p-4 space-y-3">
       {errors && errors.length > 0 && (
-        <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3">
+        <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3" role="alert">
           <div className="flex items-center gap-2 text-sm font-medium text-red-500 mb-2">
-            <AlertCircle className="h-4 w-4" />
+            <AlertCircle className="h-4 w-4" aria-hidden="true" />
             Errors ({errors.length})
           </div>
-          <div className="space-y-1 max-h-32 overflow-y-auto">
+          <div className="space-y-1 max-h-32 overflow-y-auto" tabIndex={0} role="log" aria-label="Error messages">
             {errors.slice(-5).map((err, i) => (
               <p key={i} className="text-xs text-red-400 font-mono">{err}</p>
             ))}
@@ -50,7 +50,7 @@ function ConversationPreview({ sessionId }: { sessionId: string }) {
       {messages.length === 0 ? (
         <p className="text-sm text-muted-foreground">No messages found</p>
       ) : (
-        <div className="space-y-2 max-h-64 overflow-y-auto">
+        <div className="space-y-2 max-h-64 overflow-y-auto" tabIndex={0} role="log" aria-label="Conversation messages">
           {messages.map((msg, i) => (
             <div
               key={i}
@@ -112,9 +112,10 @@ export default function HistoryPage() {
 
   if (isLoading || !history) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" role="status" aria-label="Loading session history">
         <h1 className="text-2xl font-bold">Session History</h1>
         <Skeleton className="h-96" />
+        <span className="sr-only">Loading session history...</span>
       </div>
     );
   }
@@ -131,16 +132,16 @@ export default function HistoryPage() {
       {history.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <History className="h-12 w-12 text-muted-foreground/30 mb-4" />
+            <History className="h-12 w-12 text-muted-foreground/30 mb-4" aria-hidden="true" />
             <p className="text-muted-foreground">No session history found</p>
           </CardContent>
         </Card>
       ) : (
         <div className="rounded-lg border">
-          <Table>
+          <Table aria-label="Session history">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-8"></TableHead>
+                <TableHead className="w-8"><span className="sr-only">Expand</span></TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Project</TableHead>
                 <TableHead>Duration</TableHead>
@@ -152,14 +153,29 @@ export default function HistoryPage() {
             </TableHeader>
             <TableBody>
               {history.map((session) => (
-                <>
+                <Fragment key={session.sessionId}>
                   <TableRow
-                    key={session.sessionId}
                     className="cursor-pointer hover:bg-muted/50"
                     onClick={() => toggleExpand(session.sessionId)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleExpand(session.sessionId);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-expanded={expanded.has(session.sessionId)}
+                    aria-label={`${session.projectName} session — ${session.status}. Click to ${expanded.has(session.sessionId) ? "collapse" : "expand"} details.`}
                   >
                     <TableCell>
-                      <Button variant="ghost" size="icon" className="h-6 w-6">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        aria-hidden="true"
+                        tabIndex={-1}
+                      >
                         {expanded.has(session.sessionId) ? (
                           <ChevronDown className="h-4 w-4" />
                         ) : (
@@ -197,13 +213,13 @@ export default function HistoryPage() {
                     </TableCell>
                   </TableRow>
                   {expanded.has(session.sessionId) && (
-                    <TableRow key={`preview-${session.sessionId}`}>
+                    <TableRow>
                       <TableCell colSpan={isApi ? 8 : 7} className="p-0">
                         <ConversationPreview sessionId={session.sessionId} />
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </Fragment>
               ))}
             </TableBody>
           </Table>

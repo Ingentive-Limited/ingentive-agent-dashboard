@@ -43,7 +43,7 @@ export function StatusBadge({ status }: { status: SessionStatus }) {
   const config = statusConfig[status];
   return (
     <Badge variant="outline" className={`gap-1.5 ${config.className}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${config.dotClass}`} />
+      <span className={`h-1.5 w-1.5 rounded-full ${config.dotClass}`} aria-hidden="true" />
       {config.label}
     </Badge>
   );

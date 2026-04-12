@@ -53,9 +53,10 @@ function SessionRow({ session }: { session: ClaudeSession }) {
           size="icon"
           className="h-7 w-7"
           onClick={() => openSession(session)}
+          aria-label={`Open ${session.projectName} session in terminal`}
           title="Open session in terminal"
         >
-          <ExternalLink className="h-3.5 w-3.5" />
+          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         </Button>
       </div>
     </div>
@@ -64,13 +65,13 @@ function SessionRow({ session }: { session: ClaudeSession }) {
 
 export default function DashboardPage() {
   const { data, isLoading } = usePolling<DashboardOverview>("/api/overview", 5000);
-  const { mode, toggle, isApi } = useBillingMode();
+  const { toggle, isApi } = useBillingMode();
 
   useAwaitingNotifications(data?.recentSessions);
 
   if (isLoading || !data) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" role="status" aria-label="Loading dashboard">
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           {[...Array(5)].map((_, i) => (
@@ -78,6 +79,7 @@ export default function DashboardPage() {
           ))}
         </div>
         <Skeleton className="h-64" />
+        <span className="sr-only">Loading dashboard content...</span>
       </div>
     );
   }
@@ -99,16 +101,17 @@ export default function DashboardPage() {
           size="sm"
           className="gap-2 text-xs"
           onClick={toggle}
+          aria-label={isApi ? "Billing mode: API tokens. Click to switch to subscription" : "Billing mode: Subscription. Click to switch to API"}
           title={isApi ? "Using API tokens (costs tracked)" : "Using subscription (no token costs)"}
         >
           {isApi ? (
             <>
-              <Key className="h-3.5 w-3.5" />
+              <Key className="h-3.5 w-3.5" aria-hidden="true" />
               API
             </>
           ) : (
             <>
-              <CreditCard className="h-3.5 w-3.5" />
+              <CreditCard className="h-3.5 w-3.5" aria-hidden="true" />
               Subscription
             </>
           )}
@@ -121,56 +124,59 @@ export default function DashboardPage() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Bell className={`h-4 w-4 ${awaitingSessions.length > 0 ? "text-amber-500" : "text-muted-foreground"}`} />
+              <Bell className={`h-4 w-4 ${awaitingSessions.length > 0 ? "text-amber-500" : "text-muted-foreground"}`} aria-hidden="true" />
               <CardTitle className="text-lg">Awaiting Input</CardTitle>
               {awaitingSessions.length > 0 && (
                 <Badge variant="secondary" className="text-xs">
-                  {awaitingSessions.length}
+                  <span className="sr-only">Count: </span>{awaitingSessions.length}
                 </Badge>
               )}
             </div>
             <Link href="/awaiting">
               <Button variant="ghost" size="sm" className="gap-1 text-xs">
-                View all <ArrowRight className="h-3 w-3" />
+                View all <ArrowRight className="h-3 w-3" aria-hidden="true" />
               </Button>
             </Link>
           </div>
         </CardHeader>
         <CardContent>
-          {awaitingSessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No sessions awaiting input</p>
-          ) : (
-            <div className="space-y-3">
-              {awaitingSessions.map((session) => (
-                <div key={`awaiting-${session.sessionId}`} className="space-y-2">
-                  <div className="flex items-center justify-between rounded-lg border border-amber-500/30 p-3 bg-amber-500/5">
-                    <div className="flex items-center gap-3">
-                      <StatusBadge status={session.status} />
-                      <div>
-                        <p className="text-sm font-medium">{session.projectName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          PID {session.pid} &middot; {formatDuration(session.startedAt)}
-                        </p>
+          <div aria-live="polite">
+            {awaitingSessions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No sessions awaiting input</p>
+            ) : (
+              <div className="space-y-3">
+                {awaitingSessions.map((session) => (
+                  <div key={`awaiting-${session.sessionId}`} className="space-y-2">
+                    <div className="flex items-center justify-between rounded-lg border border-amber-500/30 p-3 bg-amber-500/5">
+                      <div className="flex items-center gap-3">
+                        <StatusBadge status={session.status} />
+                        <div>
+                          <p className="text-sm font-medium">{session.projectName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            PID {session.pid} &middot; {formatDuration(session.startedAt)}
+                          </p>
+                        </div>
                       </div>
+                      <Button
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => openSession(session)}
+                        aria-label={`Resume ${session.projectName} session in terminal`}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                        Resume
+                      </Button>
                     </div>
-                    <Button
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={() => openSession(session)}
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Resume
-                    </Button>
+                    {session.lastMessage && (
+                      <div className="ml-4 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                        {session.lastMessage}
+                      </div>
+                    )}
                   </div>
-                  {session.lastMessage && (
-                    <div className="ml-4 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
-                      {session.lastMessage}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -206,7 +212,7 @@ export default function DashboardPage() {
               <CardTitle className="text-lg">Token Usage</CardTitle>
               <Link href="/tokens">
                 <Button variant="ghost" size="sm" className="gap-1 text-xs">
-                  Details <ArrowRight className="h-3 w-3" />
+                  Details <ArrowRight className="h-3 w-3" aria-hidden="true" />
                 </Button>
               </Link>
             </div>

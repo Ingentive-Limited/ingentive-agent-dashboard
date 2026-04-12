@@ -32,9 +32,10 @@ export default function ProjectDetailPage({
 
   if (isLoading || !project) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" role="status" aria-label="Loading project details">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-96" />
+        <span className="sr-only">Loading project details...</span>
       </div>
     );
   }
@@ -53,7 +54,7 @@ export default function ProjectDetailPage({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Sessions</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
+            <FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{project.sessionCount}</div>
@@ -62,7 +63,7 @@ export default function ProjectDetailPage({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Tokens</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <BarChart3 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatTokens(totalTokens)}</div>
@@ -75,7 +76,7 @@ export default function ProjectDetailPage({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Subagents</CardTitle>
-            <Bot className="h-4 w-4 text-muted-foreground" />
+            <Bot className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{project.subagents.length}</div>
@@ -84,7 +85,7 @@ export default function ProjectDetailPage({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Memory Files</CardTitle>
-            <Brain className="h-4 w-4 text-muted-foreground" />
+            <Brain className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{project.memoryFiles.length}</div>
@@ -120,7 +121,7 @@ export default function ProjectDetailPage({
         <TabsContent value="sessions" className="mt-4">
           <Card>
             <CardContent className="pt-6">
-              <Table>
+              <Table aria-label="Project sessions">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Session ID</TableHead>
@@ -194,7 +195,7 @@ export default function ProjectDetailPage({
                       key={file}
                       className="flex items-center gap-2 rounded-lg border p-3"
                     >
-                      <FileText className="h-4 w-4 text-muted-foreground" />
+                      <FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                       <span className="text-sm font-mono">{file}</span>
                     </div>
                   ))}
