@@ -7,13 +7,14 @@ import { useBillingMode } from "@/hooks/use-billing-mode";
 import { OverviewCards } from "@/components/overview-cards";
 import { TokenChart } from "@/components/token-chart";
 import { TokenBudgetCard } from "@/components/token-budget";
+import { ActivityHeatmap } from "@/components/activity-heatmap";
 import { StatusBadge } from "@/components/status-badge";
 import { ConversationViewer } from "@/components/conversation-viewer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { formatDuration } from "@/lib/utils";
-import type { DashboardOverview, ClaudeSession } from "@/lib/types";
+import type { DashboardOverview, ClaudeSession, DailyTokenUsage } from "@/lib/types";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -117,6 +118,7 @@ function SessionRow({
 
 export default function DashboardPage() {
   const { data, isLoading } = usePolling<DashboardOverview>("/api/overview", 5000);
+  const { data: dailyData } = usePolling<DailyTokenUsage[]>("/api/tokens/daily?days=140", 30000);
   const { toggle, isApi } = useBillingMode();
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
   const [viewingSession, setViewingSession] = useState<ClaudeSession | null>(null);
@@ -305,6 +307,17 @@ export default function DashboardPage() {
           dailyTokens={data.totalTokensToday}
           monthlyTokens={data.totalTokensMonth}
         />
+      )}
+
+      {dailyData && dailyData.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ActivityHeatmap data={dailyData} />
+          </CardContent>
+        </Card>
       )}
 
       {data.tokenTimeSeries.length > 0 && (
