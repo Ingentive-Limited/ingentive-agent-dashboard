@@ -6,6 +6,7 @@ import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/s
 import { AppSidebar } from "@/components/app-sidebar";
 import { SearchDialog } from "@/components/search-dialog";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
+import { AppFooter } from "@/components/app-footer";
 
 const roboto = Roboto({
   variable: "--font-roboto",
@@ -51,6 +52,7 @@ export default function RootLayout({
                 <SearchDialog />
               </header>
               <main id="main-content" className="flex-1 p-4" aria-label="Main content">{children}</main>
+              <AppFooter />
             </SidebarInset>
           </SidebarProvider>
         </Providers>

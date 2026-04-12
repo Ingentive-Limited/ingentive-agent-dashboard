@@ -304,23 +304,28 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {isApi && (
-        <TokenBudgetCard
-          dailyTokens={data.totalTokensToday}
-          monthlyTokens={data.totalTokensMonth}
-        />
-      )}
+      <div className="grid gap-4 md:grid-cols-2">
+        {dailyData && dailyData.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Activity</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ActivityHeatmap data={dailyData} />
+            </CardContent>
+          </Card>
+        )}
 
-      {dailyData && dailyData.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Activity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ActivityHeatmap data={dailyData} />
-          </CardContent>
-        </Card>
-      )}
+        {isApi ? (
+          <TokenBudgetCard
+            dailyTokens={data.totalTokensToday}
+            monthlyTokens={data.totalTokensMonth}
+          />
+        ) : (
+          /* Placeholder so the grid stays balanced when budget card is hidden */
+          dailyData && dailyData.length > 0 ? <div /> : null
+        )}
+      </div>
 
       {data.tokenTimeSeries.length > 0 && (
         <Card>

@@ -73,7 +73,37 @@ function ProjectCard({
     <Card className={`hover:bg-muted/50 transition-colors cursor-pointer h-full ${selected ? "ring-2 ring-primary" : ""}`}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base truncate">{project.name}</CardTitle>
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleFavorite();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onToggleFavorite();
+                }
+              }}
+              className="shrink-0 hover:scale-110 transition-transform"
+              aria-label={isFavorite ? `Unpin ${project.name}` : `Pin ${project.name}`}
+              title={isFavorite ? "Unpin project" : "Pin project"}
+            >
+              <Star
+                className={`h-4 w-4 ${
+                  isFavorite
+                    ? "fill-amber-400 text-amber-400"
+                    : "text-muted-foreground/30 hover:text-amber-400/60"
+                }`}
+                aria-hidden="true"
+              />
+            </span>
+            <CardTitle className="text-base truncate">{project.name}</CardTitle>
+          </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <ErrorRateBadge
               errorRate={project.errorRate}
@@ -111,39 +141,18 @@ function ProjectCard({
     </Card>
   );
 
-  // Wrap card in a relative container with the star button positioned outside the link
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onToggleFavorite();
-        }}
-        className="absolute top-3 left-3 z-10 shrink-0 hover:scale-110 transition-transform"
-        aria-label={isFavorite ? `Unpin ${project.name}` : `Pin ${project.name}`}
-        title={isFavorite ? "Unpin project" : "Pin project"}
-      >
-        <Star
-          className={`h-4 w-4 ${
-            isFavorite
-              ? "fill-amber-400 text-amber-400"
-              : "text-muted-foreground/30 hover:text-amber-400/60"
-          }`}
-          aria-hidden="true"
-        />
+  if (compareMode) {
+    return (
+      <button type="button" className="text-left w-full" onClick={onSelect}>
+        {cardInner}
       </button>
-      {compareMode ? (
-        <button type="button" className="text-left w-full pl-0" onClick={onSelect}>
-          <div className="pl-6">{cardInner}</div>
-        </button>
-      ) : (
-        <Link href={`/projects/${encodeURIComponent(project.id)}`}>
-          <div className="pl-6">{cardInner}</div>
-        </Link>
-      )}
-    </div>
+    );
+  }
+
+  return (
+    <Link href={`/projects/${encodeURIComponent(project.id)}`}>
+      {cardInner}
+    </Link>
   );
 }
 
