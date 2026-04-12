@@ -116,6 +116,28 @@ export interface SearchResult {
   snippet?: string;
 }
 
+export interface DailyTokenUsage {
+  date: string; // YYYY-MM-DD
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  totalCost: number;
+  sessionCount: number;
+}
+
+export interface ProjectStats {
+  id: string;
+  name: string;
+  totalTokens: TokenUsage;
+  cost: CostEstimate;
+  sessionCount: number;
+  lastActivity: string;
+  errorCount: number;
+  successCount: number;
+  errorRate: number;
+}
+
 export interface DashboardOverview {
   activeSessions: number;
   awaitingInput: number;

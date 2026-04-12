@@ -17,6 +17,8 @@ import type {
   SessionHistory,
   ConversationMessage,
   SearchResult,
+  DailyTokenUsage,
+  ProjectStats,
 } from "./types";
 
 // Anthropic pricing per million tokens (Sonnet 4 as default)
@@ -1176,4 +1178,186 @@ export async function getSessionErrors(sessionId: string): Promise<string[]> {
   } catch { /* skip */ }
 
   return errors.slice(-20);
+}
+
+// --- Daily Token Usage Aggregation ---
+
+export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenUsage[]> {
+  const projectsDir = path.join(CLAUDE_DIR, "projects");
+  if (!fs.existsSync(projectsDir)) return [];
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  cutoff.setHours(0, 0, 0, 0);
+  const cutoffMs = cutoff.getTime();
+
+  const dailyMap = new Map<string, { tokens: TokenUsage; sessions: Set<string> }>();
+
+  const allDirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
+  const dirs = allDirs.filter((d) => d.isDirectory());
+
+  for (const dir of dirs) {
+    const projPath = path.join(projectsDir, dir.name);
+    let files: string[];
+    try {
+      files = (await fs.promises.readdir(projPath)).filter((f) => f.endsWith(".jsonl"));
+    } catch { continue; }
+
+    // Only read files modified within the window
+    for (const file of files) {
+      const filePath = path.join(projPath, file);
+      try {
+        const stat = await fs.promises.stat(filePath);
+        if (stat.mtimeMs < cutoffMs) continue;
+
+        const sessionId = file.replace(".jsonl", "");
+        const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
+        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+        for await (const line of rl) {
+          if (!line.trim()) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type !== "assistant" || !entry.message?.usage || !entry.timestamp) continue;
+
+            const ts = new Date(entry.timestamp);
+            if (ts.getTime() < cutoffMs) continue;
+
+            const dateKey = ts.toISOString().slice(0, 10);
+            const u = entry.message.usage;
+
+            if (!dailyMap.has(dateKey)) {
+              dailyMap.set(dateKey, { tokens: emptyTokenUsage(), sessions: new Set() });
+            }
+            const day = dailyMap.get(dateKey)!;
+            day.tokens = addTokens(day.tokens, {
+              input_tokens: u.input_tokens || 0,
+              output_tokens: u.output_tokens || 0,
+              cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+              cache_read_input_tokens: u.cache_read_input_tokens || 0,
+            });
+            day.sessions.add(sessionId);
+          } catch { /* skip */ }
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Fill in missing days with zeros
+  const result: DailyTokenUsage[] = [];
+  const now = new Date();
+  for (let d = new Date(cutoff); d <= now; d.setDate(d.getDate() + 1)) {
+    const dateKey = d.toISOString().slice(0, 10);
+    const day = dailyMap.get(dateKey);
+    if (day) {
+      const cost = calculateCost(day.tokens);
+      result.push({
+        date: dateKey,
+        ...day.tokens,
+        totalCost: cost.totalCost,
+        sessionCount: day.sessions.size,
+      });
+    } else {
+      result.push({
+        date: dateKey,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        totalCost: 0,
+        sessionCount: 0,
+      });
+    }
+  }
+
+  return result;
+}
+
+// --- Project Stats with Error Rates ---
+
+export async function getProjectStats(): Promise<ProjectStats[]> {
+  const projectsDir = path.join(CLAUDE_DIR, "projects");
+  if (!fs.existsSync(projectsDir)) return [];
+
+  const pathCache = await buildProjectPathCache();
+  const allDirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
+  const dirs = allDirs.filter((d) => d.isDirectory());
+  const stats: ProjectStats[] = [];
+
+  for (const dir of dirs) {
+    const projPath = path.join(projectsDir, dir.name);
+    let files: string[];
+    try {
+      files = (await fs.promises.readdir(projPath)).filter((f) => f.endsWith(".jsonl"));
+    } catch { continue; }
+
+    let totalTokens = emptyTokenUsage();
+    let lastActivity = "";
+    let errorCount = 0;
+    let successCount = 0;
+
+    for (const file of files) {
+      const filePath = path.join(projPath, file);
+      try {
+        const stat = await fs.promises.stat(filePath);
+        const iso = stat.mtime.toISOString();
+        if (!lastActivity || iso > lastActivity) lastActivity = iso;
+
+        // Read last 20 lines to check outcome and tally tokens
+        const lines = await readLastLines(filePath, 50);
+        let sessionHasError = false;
+
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type === "assistant" && entry.message?.usage) {
+              const u = entry.message.usage;
+              totalTokens = addTokens(totalTokens, {
+                input_tokens: u.input_tokens || 0,
+                output_tokens: u.output_tokens || 0,
+                cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+                cache_read_input_tokens: u.cache_read_input_tokens || 0,
+              });
+            }
+            // Check for error indicators
+            if (entry.type === "assistant" && entry.message?.content) {
+              for (const block of entry.message.content) {
+                if (block.type === "tool_result" && block.is_error) {
+                  sessionHasError = true;
+                }
+              }
+            }
+            if (entry.type === "result" && entry.is_error) {
+              sessionHasError = true;
+            }
+          } catch { /* skip */ }
+        }
+
+        if (sessionHasError) {
+          errorCount++;
+        } else {
+          successCount++;
+        }
+      } catch { /* skip */ }
+    }
+
+    const realPath = pathCache.get(dir.name) || decodeProjectPath(dir.name);
+    const total = errorCount + successCount;
+
+    stats.push({
+      id: dir.name,
+      name: projectNameFromPath(realPath),
+      totalTokens,
+      cost: calculateCost(totalTokens),
+      sessionCount: files.length,
+      lastActivity,
+      errorCount,
+      successCount,
+      errorRate: total > 0 ? errorCount / total : 0,
+    });
+  }
+
+  return stats.sort(
+    (a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+  );
 }
