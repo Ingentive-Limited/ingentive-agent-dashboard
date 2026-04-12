@@ -170,14 +170,59 @@ function projectNameFromPath(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
-// Read the last N lines of a file efficiently
+// Read the last N lines of a file by reading chunks from the end.
+// Avoids loading the entire file into memory for large JSONL files.
+const READ_CHUNK_SIZE = 8192;
+
 async function readLastLines(
   filePath: string,
   n: number
 ): Promise<string[]> {
-  const content = await fs.promises.readFile(filePath, "utf-8");
-  const lines = content.trim().split("\n");
-  return lines.slice(-n);
+  const stat = await fs.promises.stat(filePath);
+  const fileSize = stat.size;
+
+  if (fileSize === 0) return [];
+
+  // For small files (< 64KB), just read the whole thing
+  if (fileSize < 65536) {
+    const content = await fs.promises.readFile(filePath, "utf-8");
+    const lines = content.trim().split("\n");
+    return lines.slice(-n);
+  }
+
+  // For large files, read chunks from the end
+  const fd = await fs.promises.open(filePath, "r");
+  try {
+    const lines: string[] = [];
+    let remaining = "";
+    let position = fileSize;
+
+    while (lines.length < n && position > 0) {
+      const chunkSize = Math.min(READ_CHUNK_SIZE, position);
+      position -= chunkSize;
+      const buf = Buffer.alloc(chunkSize);
+      await fd.read(buf, 0, chunkSize, position);
+      const chunk = buf.toString("utf-8") + remaining;
+      const parts = chunk.split("\n");
+      // The first element is a partial line (unless we're at the start)
+      remaining = parts[0];
+      // Add complete lines from this chunk (in reverse, we'll reverse later)
+      for (let i = parts.length - 1; i >= 1; i--) {
+        const line = parts[i].trim();
+        if (line) lines.push(line);
+        if (lines.length >= n) break;
+      }
+    }
+
+    // If we reached the start of the file, include the remaining partial line
+    if (position === 0 && remaining.trim() && lines.length < n) {
+      lines.push(remaining.trim());
+    }
+
+    return lines.reverse();
+  } finally {
+    await fd.close();
+  }
 }
 
 // Determine session status from the last JSONL entry
@@ -239,14 +284,26 @@ function getSessionStatus(lastEntry: Record<string, unknown>): {
   return { status: "idle", slug };
 }
 
+/** Validate that a resolved path stays within an expected base directory. */
+function isWithinDir(filePath: string, baseDir: string): boolean {
+  const resolved = path.resolve(filePath);
+  const resolvedBase = path.resolve(baseDir) + path.sep;
+  return resolved.startsWith(resolvedBase) || resolved === path.resolve(baseDir);
+}
+
 // Get the session's JSONL file path by matching sessionId to project files
 function findSessionJsonl(sessionId: string): string | null {
+  // Defense-in-depth: validate sessionId format even though callers should too
+  if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null;
+
   const projectsDir = path.join(CLAUDE_DIR, "projects");
   if (!fs.existsSync(projectsDir)) return null;
 
   const projects = fs.readdirSync(projectsDir);
   for (const proj of projects) {
     const jsonlPath = path.join(projectsDir, proj, `${sessionId}.jsonl`);
+    // Verify resolved path is within CLAUDE_DIR
+    if (!isWithinDir(jsonlPath, CLAUDE_DIR)) continue;
     if (fs.existsSync(jsonlPath)) {
       return jsonlPath;
     }
@@ -402,7 +459,12 @@ export async function getProjects(): Promise<ProjectSummary[]> {
 export async function getProjectDetail(
   projectId: string
 ): Promise<ProjectDetail | null> {
+  // Defense-in-depth: validate projectId format
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) return null;
+
   const projectPath = path.join(CLAUDE_DIR, "projects", projectId);
+  // Verify resolved path stays within CLAUDE_DIR/projects
+  if (!isWithinDir(projectPath, path.join(CLAUDE_DIR, "projects"))) return null;
   if (!fs.existsSync(projectPath)) return null;
 
   const jsonlFiles = fs.readdirSync(projectPath).filter((f) =>

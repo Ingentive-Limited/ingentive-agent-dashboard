@@ -1,43 +1,34 @@
 import { NextResponse } from "next/server";
-import { execFile, spawn } from "child_process";
+import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
+import os from "os";
 
 export const dynamic = "force-dynamic";
 
 const IS_WIN = process.platform === "win32";
 
-function escapeAppleScript(str: string): string {
-  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function escapeShellArg(str: string): string {
-  // Wrap in single quotes and escape any embedded single quotes
-  return "'" + str.replace(/'/g, "'\\''") + "'";
-}
-
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
+/**
+ * Opens a terminal with `claude -r <sessionId>` in the given cwd.
+ * Uses spawn with the cwd option to avoid shell injection entirely.
+ */
 function openSessionInTerminal(cwd: string, sessionId: string) {
   if (IS_WIN) {
-    // Windows: spawn cmd.exe with the claude command
-    // Use spawn with shell:false to avoid injection, then let cmd handle the cd+claude
-    // cmd.exe /k handles the command safely when passed as a single argument
-    const cmd = `cd /d ${escapeShellArg(cwd)} && claude -r ${sessionId}`;
-    spawn("cmd.exe", ["/c", "start", "cmd.exe", "/k", cmd], {
+    // Windows: open a new cmd.exe window, run claude -r
+    // Use 'start' to open a new window, then run claude directly
+    spawn("cmd.exe", ["/c", "start", "cmd.exe", "/k", "claude", "-r", sessionId], {
+      cwd,
       detached: true,
       stdio: "ignore",
     }).unref();
   } else if (process.platform === "linux") {
-    // Linux: try common terminal emulators
-    // Use bash -c with properly escaped arguments
-    const safeCwd = escapeShellArg(cwd);
-    const cmd = `cd ${safeCwd} && claude -r ${sessionId}; exec bash`;
-
+    // Linux: try common terminal emulators with direct args (no shell interpolation)
     const terminals = [
-      { bin: "gnome-terminal", args: ["--", "bash", "-c", cmd] },
-      { bin: "konsole", args: ["-e", "bash", "-c", cmd] },
-      { bin: "xterm", args: ["-e", "bash", "-c", cmd] },
+      { bin: "gnome-terminal", args: ["--working-directory", cwd, "--", "claude", "-r", sessionId] },
+      { bin: "konsole", args: ["--workdir", cwd, "-e", "claude", "-r", sessionId] },
+      { bin: "xterm", args: ["-e", "claude", "-r", sessionId] },
     ];
 
     function tryTerminal(index: number) {
@@ -46,26 +37,36 @@ function openSessionInTerminal(cwd: string, sessionId: string) {
         return;
       }
       const t = terminals[index];
-      execFile(t.bin, t.args, (err) => {
-        if (err) tryTerminal(index + 1);
+      const proc = spawn(t.bin, t.args, {
+        cwd,
+        detached: true,
+        stdio: "ignore",
       });
+      proc.on("error", () => tryTerminal(index + 1));
+      proc.unref();
     }
     tryTerminal(0);
   } else {
-    // macOS: use osascript to open Terminal.app
-    const safeCwd = escapeAppleScript(cwd);
-    const safeSessionId = escapeAppleScript(sessionId);
-
-    const script = `tell application "Terminal"
-      activate
-      do script "cd \\"${safeCwd}\\" && claude -r ${safeSessionId}"
-    end tell`;
-
-    execFile("osascript", ["-e", script], (err) => {
-      if (err) {
-        console.error("Failed to open terminal:", err);
-      }
+    // macOS: use `open -a Terminal <cwd>` to open Terminal at the directory,
+    // then use osascript to run the claude command in the frontmost Terminal window.
+    // The sessionId is validated by regex, so it's safe to interpolate.
+    const proc = spawn("open", ["-a", "Terminal", cwd], {
+      detached: true,
+      stdio: "ignore",
     });
+    proc.on("close", () => {
+      // Give Terminal a moment to open, then run the command
+      setTimeout(() => {
+        spawn("osascript", [
+          "-e",
+          `tell application "Terminal" to do script "claude -r ${sessionId}" in front window`,
+        ], {
+          detached: true,
+          stdio: "ignore",
+        }).unref();
+      }, 500);
+    });
+    proc.unref();
   }
 }
 
@@ -88,9 +89,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate cwd is an absolute path that exists
+    // Validate cwd is an absolute path that exists within the user's home
     const resolvedCwd = path.resolve(cwd);
-    if (!path.isAbsolute(resolvedCwd) || !fs.existsSync(resolvedCwd)) {
+    const homeDir = os.homedir();
+    if (
+      !path.isAbsolute(resolvedCwd) ||
+      !resolvedCwd.startsWith(homeDir) ||
+      !fs.existsSync(resolvedCwd)
+    ) {
       return NextResponse.json(
         { error: "Invalid working directory" },
         { status: 400 }
