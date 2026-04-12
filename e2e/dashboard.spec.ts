@@ -20,13 +20,17 @@ test.describe("Dashboard", () => {
     await page.goto("/");
     // ~/.claude/ is seeded with fixture data in CI, so loading should complete
     await page.waitForSelector('[role="status"]', { state: "detached", timeout: 15000 }).catch(() => {});
-    await expect(page.getByText("Awaiting Input")).toBeVisible({ timeout: 15000 });
+    // Scope to main content to avoid matching sidebar nav link and status badge
+    const main = page.locator("#main-content");
+    await expect(main.locator('[data-slot="card-title"]', { hasText: "Awaiting Input" })).toBeVisible({ timeout: 15000 });
   });
 
   test("shows active sessions section after load", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector('[role="status"]', { state: "detached", timeout: 15000 }).catch(() => {});
-    await expect(page.getByText("Active Sessions")).toBeVisible({ timeout: 15000 });
+    // Scope to main content — "Active Sessions" appears in both overview card and section heading
+    const main = page.locator("#main-content");
+    await expect(main.locator('[data-slot="card-title"]', { hasText: "Active Sessions" }).first()).toBeVisible({ timeout: 15000 });
   });
 
   test("has billing mode toggle", async ({ page }) => {

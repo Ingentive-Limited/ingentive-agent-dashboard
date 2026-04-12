@@ -48,7 +48,8 @@ test.describe("System Status Bar", () => {
       await page.waitForTimeout(500);
     }
     await expect(statusBar).toBeVisible({ timeout: 10000 });
-    // Should show API status (OK, Degraded, or Unknown)
-    await expect(statusBar.getByText(/API/i)).toBeVisible({ timeout: 5000 });
+    // Should show API status (OK, Degraded, or Unknown) — use exact text to avoid
+    // matching both "API OK" and the separate "API" billing label
+    await expect(statusBar.getByText(/API (OK|Degraded|Unknown)/)).toBeVisible({ timeout: 5000 });
   });
 });
