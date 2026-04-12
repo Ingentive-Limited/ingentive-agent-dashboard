@@ -54,7 +54,7 @@ export default function TasksPage() {
           {Array.from(grouped.entries()).map(([project, projectTasks]) => (
             <div key={project} className="space-y-3">
               <div className="flex items-center gap-2">
-                <FolderOpen className="h-4 w-4 text-muted-foreground" />
+                <FolderOpen className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 <h2 className="text-sm font-medium text-muted-foreground">
                   {project}
                 </h2>

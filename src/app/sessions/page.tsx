@@ -54,7 +54,7 @@ export default function SessionsPage() {
       </div>
 
       <div className="rounded-lg border">
-        <Table>
+        <Table aria-label="Active sessions">
           <TableHeader>
             <TableRow>
               <TableHead>Status</TableHead>
@@ -63,7 +63,7 @@ export default function SessionsPage() {
               <TableHead>Duration</TableHead>
               <TableHead>Entrypoint</TableHead>
               <TableHead>Working Directory</TableHead>
-              <TableHead className="w-10"></TableHead>
+              <TableHead className="w-10"><span className="sr-only">Actions</span></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -103,9 +103,10 @@ export default function SessionsPage() {
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => openSession(session)}
+                        aria-label={`Open ${session.projectName} session in terminal`}
                         title="Open session in terminal"
                       >
-                        <ExternalLink className="h-3.5 w-3.5" />
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                       </Button>
                     )}
                   </TableCell>

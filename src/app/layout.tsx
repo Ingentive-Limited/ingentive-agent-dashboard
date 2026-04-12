@@ -38,11 +38,11 @@ export default function RootLayout({
           <SidebarProvider>
             <AppSidebar />
             <SidebarInset>
-              <header className="flex h-10 shrink-0 items-center justify-between border-b px-3">
+              <header className="flex h-10 shrink-0 items-center justify-between border-b px-3" aria-label="Top navigation">
                 <SidebarTrigger className="-ml-1" />
                 <SearchDialog />
               </header>
-              <main className="flex-1 p-4">{children}</main>
+              <main className="flex-1 p-4" aria-label="Main content">{children}</main>
             </SidebarInset>
           </SidebarProvider>
         </Providers>

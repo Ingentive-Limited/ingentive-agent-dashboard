@@ -19,7 +19,7 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
-          <Terminal className="h-4 w-4 text-muted-foreground" />
+          <Terminal className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">{data.activeSessions}</div>
@@ -32,7 +32,7 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Session Tokens</CardTitle>
-          <BarChart3 className="h-4 w-4 text-muted-foreground" />
+          <BarChart3 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">{formatTokens(totalTokens)}</div>
@@ -47,7 +47,7 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Estimated Cost</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <DollarSign className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -63,7 +63,7 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Active Projects</CardTitle>
-          <FolderOpen className="h-4 w-4 text-muted-foreground" />
+          <FolderOpen className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">{data.activeProjects}</div>
@@ -74,7 +74,7 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Scheduled Tasks</CardTitle>
-          <Clock className="h-4 w-4 text-muted-foreground" />
+          <Clock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">{data.scheduledTasks}</div>
