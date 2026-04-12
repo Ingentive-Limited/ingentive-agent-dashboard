@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { middleware } from "@/middleware";
+import { proxy } from "@/proxy";
 import { NextRequest } from "next/server";
 
 function makeRequest(
@@ -23,45 +23,45 @@ function makeRequest(
   });
 }
 
-describe("middleware", () => {
+describe("proxy", () => {
   it("allows non-API routes without checks", () => {
-    const res = middleware(makeRequest("/"));
+    const res = proxy(makeRequest("/"));
     expect(res.status).toBe(200);
   });
 
   it("allows API requests from localhost origin", () => {
-    const res = middleware(
+    const res = proxy(
       makeRequest("/api/overview", { origin: "http://localhost:3000" })
     );
     expect(res.status).toBe(200);
   });
 
   it("blocks API requests from foreign origin", () => {
-    const res = middleware(
+    const res = proxy(
       makeRequest("/api/overview", { origin: "http://evil.com" })
     );
     expect(res.status).toBe(403);
   });
 
   it("blocks API requests from foreign referer", () => {
-    const res = middleware(
+    const res = proxy(
       makeRequest("/api/overview", { referer: "http://evil.com/page" })
     );
     expect(res.status).toBe(403);
   });
 
   it("blocks POST without origin or referer", () => {
-    const res = middleware(makeRequest("/api/sessions/kill", { method: "POST" }));
+    const res = proxy(makeRequest("/api/sessions/kill", { method: "POST" }));
     expect(res.status).toBe(403);
   });
 
   it("allows GET without origin or referer", () => {
-    const res = middleware(makeRequest("/api/overview"));
+    const res = proxy(makeRequest("/api/overview"));
     expect(res.status).toBe(200);
   });
 
   it("blocks API requests from non-local host", () => {
-    const res = middleware(
+    const res = proxy(
       makeRequest("/api/overview", {
         origin: "http://localhost:3000",
         host: "remote-server.com:3000",
@@ -71,7 +71,7 @@ describe("middleware", () => {
   });
 
   it("allows requests from 127.0.0.1", () => {
-    const res = middleware(
+    const res = proxy(
       makeRequest("/api/overview", {
         origin: "http://127.0.0.1:3000",
         host: "127.0.0.1:3000",
@@ -81,7 +81,7 @@ describe("middleware", () => {
   });
 
   it("blocks invalid origin URLs", () => {
-    const res = middleware(
+    const res = proxy(
       makeRequest("/api/overview", { origin: "not-a-url" })
     );
     expect(res.status).toBe(403);

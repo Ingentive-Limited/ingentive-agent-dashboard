@@ -16,7 +16,7 @@ export default defineConfig({
     include: ["src/__tests__/**/*.test.{ts,tsx}"],
     coverage: {
       reporter: ["text", "lcov"],
-      include: ["src/lib/**", "src/hooks/**", "src/middleware.ts"],
+      include: ["src/lib/**", "src/hooks/**", "src/proxy.ts"],
     },
   },
 });

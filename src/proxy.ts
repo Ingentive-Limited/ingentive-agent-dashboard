@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Security middleware: blocks requests to API routes that don't originate
+ * Security proxy: blocks requests to API routes that don't originate
  * from localhost. Prevents CSRF attacks from malicious websites.
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   // Only protect API routes
   if (!request.nextUrl.pathname.startsWith("/api/")) {
     return NextResponse.next();
