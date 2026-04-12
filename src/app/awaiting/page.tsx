@@ -97,29 +97,33 @@ export default function AwaitingPage() {
     "/api/sessions",
     3000
   );
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const { request, isGranted } = useNotificationPermission();
+  const [browserPermission, setBrowserPermission] = useState<"default" | "granted" | "denied">("default");
+  const { request } = useNotificationPermission();
   const { prefs, update } = useNotificationPreferences();
 
   useAwaitingNotifications(sessions);
 
   useEffect(() => {
-    setNotificationsEnabled(isGranted());
-  }, [isGranted]);
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setBrowserPermission(Notification.permission);
+    }
+  }, []);
 
-  const enableNotifications = async () => {
-    const granted = await request();
-    setNotificationsEnabled(granted);
-    update({ enabled: granted });
-  };
-
-  const toggleNotifications = () => {
-    if (!notificationsEnabled) {
-      enableNotifications();
+  const handleNotificationToggle = async () => {
+    if (browserPermission !== "granted") {
+      // Need to request browser permission first
+      const granted = await request();
+      setBrowserPermission(granted ? "granted" : "denied");
+      if (granted) {
+        update({ enabled: true });
+      }
     } else {
+      // Browser permission already granted, toggle our preference
       update({ enabled: !prefs.enabled });
     }
   };
+
+  const notificationsActive = browserPermission === "granted" && prefs.enabled;
 
   const awaitingSessions = sessions?.filter(
     (s) =>
@@ -147,12 +151,12 @@ export default function AwaitingPage() {
         </div>
         <div className="relative flex items-center gap-2">
           <Button
-            variant={notificationsEnabled && prefs.enabled ? "secondary" : "default"}
+            variant={notificationsActive ? "secondary" : "default"}
             size="sm"
-            onClick={toggleNotifications}
+            onClick={handleNotificationToggle}
             className="gap-2"
           >
-            {notificationsEnabled && prefs.enabled ? (
+            {notificationsActive ? (
               <>
                 <Bell className="h-4 w-4" />
                 Notifications On
@@ -160,11 +164,15 @@ export default function AwaitingPage() {
             ) : (
               <>
                 <BellOff className="h-4 w-4" />
-                {notificationsEnabled ? "Notifications Off" : "Enable Notifications"}
+                {browserPermission === "denied"
+                  ? "Notifications Blocked"
+                  : browserPermission === "granted"
+                    ? "Notifications Off"
+                    : "Enable Notifications"}
               </>
             )}
           </Button>
-          {notificationsEnabled && <NotificationSettings />}
+          {browserPermission === "granted" && <NotificationSettings />}
         </div>
       </div>
 
