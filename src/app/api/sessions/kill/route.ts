@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveSessions } from "@/lib/claude-data";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,16 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "pid must be a positive integer" },
         { status: 400 }
+      );
+    }
+
+    // Verify the PID belongs to a known Claude session
+    const sessions = await getActiveSessions();
+    const isClaudeSession = sessions.some((s) => s.pid === pid && s.isAlive);
+    if (!isClaudeSession) {
+      return NextResponse.json(
+        { error: "Not a known Claude session" },
+        { status: 403 }
       );
     }
 

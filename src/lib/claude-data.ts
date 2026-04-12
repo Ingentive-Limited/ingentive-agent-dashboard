@@ -643,7 +643,7 @@ export async function getScheduledTasks(): Promise<ScheduledTask[]> {
               }
               // Try to read SKILL.md for a better description
               let description = id.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-              if (t.filePath && fs.existsSync(t.filePath)) {
+              if (t.filePath && isWithinDir(t.filePath, CLAUDE_DIR) && fs.existsSync(t.filePath)) {
                 try {
                   const skillContent = await fs.promises.readFile(t.filePath, "utf-8");
                   const descMatch = skillContent.match(/description:\s*(.+)/);
