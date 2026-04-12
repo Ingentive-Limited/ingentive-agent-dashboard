@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import { useBillingMode } from "@/hooks/use-billing-mode";
+import { usePersistedState } from "@/hooks/use-persisted-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -240,8 +241,8 @@ export default function ProjectsPage() {
     "/api/projects/stats",
     10000
   );
-  const [sortKey, setSortKey] = useState<SortKey>("activity");
-  const [groupMode, setGroupMode] = useState<GroupMode>("none");
+  const [sortKey, setSortKey] = usePersistedState<SortKey>("projects-sort", "activity");
+  const [groupMode, setGroupMode] = usePersistedState<GroupMode>("projects-group", "none");
   const [compareMode, setCompareMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const { isApi } = useBillingMode();

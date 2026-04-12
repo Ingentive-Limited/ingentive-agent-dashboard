@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import { useBillingMode } from "@/hooks/use-billing-mode";
+import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useTheme } from "next-themes";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -100,7 +101,7 @@ function InteractiveLegend({
 }
 
 export default function TokensPage() {
-  const [dateRange, setDateRange] = useState<DateRange>(30);
+  const [dateRange, setDateRange] = usePersistedState<DateRange>("tokens-range", 30);
   const { data: projects, isLoading: projectsLoading } = usePolling<ProjectSummary[]>(
     "/api/projects",
     10000
