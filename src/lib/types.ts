@@ -120,6 +120,7 @@ export interface DashboardOverview {
   activeSessions: number;
   awaitingInput: number;
   totalTokensToday: TokenUsage;
+  totalTokensMonth: TokenUsage;
   totalCost: CostEstimate;
   activeProjects: number;
   scheduledTasks: number;

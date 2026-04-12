@@ -292,7 +292,7 @@ function isWithinDir(filePath: string, baseDir: string): boolean {
 }
 
 // Get the session's JSONL file path by matching sessionId to project files
-function findSessionJsonl(sessionId: string): string | null {
+export function findSessionJsonl(sessionId: string): string | null {
   // Defense-in-depth: validate sessionId format even though callers should too
   if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null;
 
@@ -862,10 +862,29 @@ export async function getOverview(): Promise<DashboardOverview> {
     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
+  // Compute monthly tokens from the time series
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const monthStartMs = monthStart.getTime();
+
+  let monthlyTokens = emptyTokenUsage();
+  for (const point of tokenTimeSeries) {
+    if (new Date(point.timestamp).getTime() >= monthStartMs) {
+      monthlyTokens = addTokens(monthlyTokens, {
+        input_tokens: point.input_tokens,
+        output_tokens: point.output_tokens,
+        cache_creation_input_tokens: point.cache_creation_input_tokens,
+        cache_read_input_tokens: point.cache_read_input_tokens,
+      });
+    }
+  }
+
   return {
     activeSessions: aliveSessions.length,
     awaitingInput: awaitingInput.length,
     totalTokensToday: todayTokens,
+    totalTokensMonth: monthlyTokens,
     totalCost: calculateCost(todayTokens),
     activeProjects: projects.filter((p) => {
       return (

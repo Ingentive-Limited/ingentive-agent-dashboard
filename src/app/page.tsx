@@ -1,11 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import { useAwaitingNotifications } from "@/hooks/use-notifications";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import { OverviewCards } from "@/components/overview-cards";
 import { TokenChart } from "@/components/token-chart";
+import { TokenBudgetCard } from "@/components/token-budget";
 import { StatusBadge } from "@/components/status-badge";
+import { ConversationViewer } from "@/components/conversation-viewer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -13,7 +16,15 @@ import { formatDuration } from "@/lib/utils";
 import type { DashboardOverview, ClaudeSession } from "@/lib/types";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, Bell, ArrowRight, CreditCard, Key } from "lucide-react";
+import {
+  ExternalLink,
+  Bell,
+  ArrowRight,
+  CreditCard,
+  Key,
+  Square,
+  MessageSquare,
+} from "lucide-react";
 
 function openSession(session: ClaudeSession) {
   fetch("/api/sessions/open", {
@@ -27,7 +38,25 @@ function openSession(session: ClaudeSession) {
   });
 }
 
-function SessionRow({ session }: { session: ClaudeSession }) {
+function killSession(pid: number): Promise<boolean> {
+  return fetch("/api/sessions/kill", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pid }),
+  }).then((r) => r.ok);
+}
+
+function SessionRow({
+  session,
+  onKill,
+  killingPids,
+  onViewConversation,
+}: {
+  session: ClaudeSession;
+  onKill: (pid: number) => void;
+  killingPids: Set<number>;
+  onViewConversation: (session: ClaudeSession) => void;
+}) {
   return (
     <div className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/50 transition-colors">
       <div className="flex items-center gap-3">
@@ -52,12 +81,35 @@ function SessionRow({ session }: { session: ClaudeSession }) {
           variant="ghost"
           size="icon"
           className="h-7 w-7"
+          onClick={() => onViewConversation(session)}
+          aria-label={`View conversation for ${session.projectName}`}
+          title="View conversation"
+        >
+          <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
           onClick={() => openSession(session)}
           aria-label={`Open ${session.projectName} session in terminal`}
           title="Open session in terminal"
         >
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         </Button>
+        {session.isAlive && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={() => onKill(session.pid)}
+            disabled={killingPids.has(session.pid)}
+            aria-label={`Stop ${session.projectName} session`}
+            title="Stop session"
+          >
+            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -66,8 +118,22 @@ function SessionRow({ session }: { session: ClaudeSession }) {
 export default function DashboardPage() {
   const { data, isLoading } = usePolling<DashboardOverview>("/api/overview", 5000);
   const { toggle, isApi } = useBillingMode();
+  const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
+  const [viewingSession, setViewingSession] = useState<ClaudeSession | null>(null);
 
   useAwaitingNotifications(data?.recentSessions);
+
+  const handleKill = async (pid: number) => {
+    setKillingPids((prev) => new Set(prev).add(pid));
+    await killSession(pid);
+    setTimeout(() => {
+      setKillingPids((prev) => {
+        const next = new Set(prev);
+        next.delete(pid);
+        return next;
+      });
+    }, 2000);
+  };
 
   if (isLoading || !data) {
     return (
@@ -157,15 +223,38 @@ export default function DashboardPage() {
                           </p>
                         </div>
                       </div>
-                      <Button
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={() => openSession(session)}
-                        aria-label={`Resume ${session.projectName} session in terminal`}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                        Resume
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setViewingSession(session)}
+                          aria-label={`View conversation for ${session.projectName}`}
+                          title="View conversation"
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => openSession(session)}
+                          aria-label={`Resume ${session.projectName} session in terminal`}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                          Resume
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => handleKill(session.pid)}
+                          disabled={killingPids.has(session.pid)}
+                          aria-label={`Stop ${session.projectName} session`}
+                          title="Stop session"
+                        >
+                          <Square className="h-3 w-3 fill-current" aria-hidden="true" />
+                        </Button>
+                      </div>
                     </div>
                     {session.lastMessage && (
                       <div className="ml-4 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
@@ -190,7 +279,13 @@ export default function DashboardPage() {
           ) : (
             <div className="space-y-3">
               {nonAwaitingSessions.map((session) => (
-                <SessionRow key={`active-${session.sessionId}`} session={session} />
+                <SessionRow
+                  key={`active-${session.sessionId}`}
+                  session={session}
+                  onKill={handleKill}
+                  killingPids={killingPids}
+                  onViewConversation={setViewingSession}
+                />
               ))}
             </div>
           )}
@@ -204,6 +299,13 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {isApi && (
+        <TokenBudgetCard
+          dailyTokens={data.totalTokensToday}
+          monthlyTokens={data.totalTokensMonth}
+        />
+      )}
 
       {data.tokenTimeSeries.length > 0 && (
         <Card>
@@ -221,6 +323,17 @@ export default function DashboardPage() {
             <TokenChart data={data.tokenTimeSeries} />
           </CardContent>
         </Card>
+      )}
+
+      {viewingSession && (
+        <ConversationViewer
+          sessionId={viewingSession.sessionId}
+          projectName={viewingSession.projectName}
+          open={!!viewingSession}
+          onOpenChange={(open) => {
+            if (!open) setViewingSession(null);
+          }}
+        />
       )}
     </div>
   );

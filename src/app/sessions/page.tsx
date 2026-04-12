@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,8 @@ import {
 } from "@/components/ui/table";
 import { formatDuration } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/types";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Square, MessageSquare } from "lucide-react";
+import { ConversationViewer } from "@/components/conversation-viewer";
 
 function openSession(session: ClaudeSession) {
   fetch("/api/sessions/open", {
@@ -29,11 +31,34 @@ function openSession(session: ClaudeSession) {
   });
 }
 
+function killSession(pid: number): Promise<boolean> {
+  return fetch("/api/sessions/kill", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pid }),
+  }).then((r) => r.ok);
+}
+
 export default function SessionsPage() {
   const { data: sessions, isLoading } = usePolling<ClaudeSession[]>(
     "/api/sessions",
     5000
   );
+  const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
+  const [viewingSession, setViewingSession] = useState<ClaudeSession | null>(null);
+
+  const handleKill = async (pid: number) => {
+    setKillingPids((prev) => new Set(prev).add(pid));
+    await killSession(pid);
+    // Wait a moment for the process to die, then the next poll will update
+    setTimeout(() => {
+      setKillingPids((prev) => {
+        const next = new Set(prev);
+        next.delete(pid);
+        return next;
+      });
+    }, 2000);
+  };
 
   if (isLoading || !sessions) {
     return (
@@ -63,7 +88,7 @@ export default function SessionsPage() {
               <TableHead>Duration</TableHead>
               <TableHead>Entrypoint</TableHead>
               <TableHead>Working Directory</TableHead>
-              <TableHead className="w-10"><span className="sr-only">Actions</span></TableHead>
+              <TableHead className="w-28"><span className="sr-only">Actions</span></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -97,18 +122,43 @@ export default function SessionsPage() {
                     {session.cwd}
                   </TableCell>
                   <TableCell>
-                    {session.isAlive && (
+                    <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={() => openSession(session)}
-                        aria-label={`Open ${session.projectName} session in terminal`}
-                        title="Open session in terminal"
+                        onClick={() => setViewingSession(session)}
+                        aria-label={`View conversation for ${session.projectName}`}
+                        title="View conversation"
                       >
-                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                        <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
                       </Button>
-                    )}
+                      {session.isAlive && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => openSession(session)}
+                            aria-label={`Open ${session.projectName} session in terminal`}
+                            title="Open session in terminal"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleKill(session.pid)}
+                            disabled={killingPids.has(session.pid)}
+                            aria-label={`Stop ${session.projectName} session`}
+                            title="Stop session"
+                          >
+                            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -116,6 +166,17 @@ export default function SessionsPage() {
           </TableBody>
         </Table>
       </div>
+
+      {viewingSession && (
+        <ConversationViewer
+          sessionId={viewingSession.sessionId}
+          projectName={viewingSession.projectName}
+          open={!!viewingSession}
+          onOpenChange={(open) => {
+            if (!open) setViewingSession(null);
+          }}
+        />
+      )}
     </div>
   );
 }

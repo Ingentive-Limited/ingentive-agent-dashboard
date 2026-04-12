@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import {
   useAwaitingNotifications,
@@ -11,10 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Bell, BellOff, ExternalLink, Settings2 } from "lucide-react";
+import { Bell, BellOff, ExternalLink, Settings2, Square, MessageSquare } from "lucide-react";
 import { formatDuration } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/types";
-import { useState, useEffect } from "react";
+import { ConversationViewer } from "@/components/conversation-viewer";
 
 function openSession(session: ClaudeSession) {
   fetch("/api/sessions/open", {
@@ -26,6 +27,14 @@ function openSession(session: ClaudeSession) {
       entrypoint: session.entrypoint,
     }),
   });
+}
+
+function killSession(pid: number): Promise<boolean> {
+  return fetch("/api/sessions/kill", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pid }),
+  }).then((r) => r.ok);
 }
 
 function NotificationSettings() {
@@ -101,6 +110,8 @@ export default function AwaitingPage() {
   const [browserPermission, setBrowserPermission] = useState<"default" | "granted" | "denied">("default");
   const { request } = useNotificationPermission();
   const { prefs, update } = useNotificationPreferences();
+  const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
+  const [viewingSession, setViewingSession] = useState<ClaudeSession | null>(null);
 
   useAwaitingNotifications(sessions);
 
@@ -112,16 +123,26 @@ export default function AwaitingPage() {
 
   const handleNotificationToggle = async () => {
     if (browserPermission !== "granted") {
-      // Need to request browser permission first
       const granted = await request();
       setBrowserPermission(granted ? "granted" : "denied");
       if (granted) {
         update({ enabled: true });
       }
     } else {
-      // Browser permission already granted, toggle our preference
       update({ enabled: !prefs.enabled });
     }
+  };
+
+  const handleKill = async (pid: number) => {
+    setKillingPids((prev) => new Set(prev).add(pid));
+    await killSession(pid);
+    setTimeout(() => {
+      setKillingPids((prev) => {
+        const next = new Set(prev);
+        next.delete(pid);
+        return next;
+      });
+    }, 2000);
   };
 
   const notificationsActive = browserPermission === "granted" && prefs.enabled;
@@ -216,6 +237,16 @@ export default function AwaitingPage() {
                       PID {session.pid}
                     </span>
                     <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => setViewingSession(session)}
+                      aria-label={`View conversation for ${session.projectName}`}
+                      title="View conversation"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Button>
+                    <Button
                       size="sm"
                       className="gap-1.5"
                       onClick={() => openSession(session)}
@@ -223,6 +254,17 @@ export default function AwaitingPage() {
                     >
                       <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                       Resume
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => handleKill(session.pid)}
+                      disabled={killingPids.has(session.pid)}
+                      aria-label={`Stop ${session.projectName} session`}
+                      title="Stop session"
+                    >
+                      <Square className="h-3 w-3 fill-current" aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
@@ -250,6 +292,17 @@ export default function AwaitingPage() {
             </Card>
           ))}
         </div>
+      )}
+
+      {viewingSession && (
+        <ConversationViewer
+          sessionId={viewingSession.sessionId}
+          projectName={viewingSession.projectName}
+          open={!!viewingSession}
+          onOpenChange={(open) => {
+            if (!open) setViewingSession(null);
+          }}
+        />
       )}
     </div>
   );
