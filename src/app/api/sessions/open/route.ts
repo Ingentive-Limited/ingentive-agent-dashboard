@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 
@@ -11,26 +11,33 @@ function escapeAppleScript(str: string): string {
   return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function escapeShellArg(str: string): string {
+  // Wrap in single quotes and escape any embedded single quotes
+  return "'" + str.replace(/'/g, "'\\''") + "'";
+}
+
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 function openSessionInTerminal(cwd: string, sessionId: string) {
   if (IS_WIN) {
-    // Windows: open Windows Terminal or cmd with the claude command
-    const cmd = `cd /d "${cwd}" && claude -r ${sessionId}`;
-    // Try Windows Terminal first, fall back to cmd
-    execFile("cmd.exe", ["/c", "start", "cmd.exe", "/k", cmd], (err) => {
-      if (err) {
-        console.error("Failed to open terminal:", err);
-      }
-    });
+    // Windows: spawn cmd.exe with the claude command
+    // Use spawn with shell:false to avoid injection, then let cmd handle the cd+claude
+    // cmd.exe /k handles the command safely when passed as a single argument
+    const cmd = `cd /d ${escapeShellArg(cwd)} && claude -r ${sessionId}`;
+    spawn("cmd.exe", ["/c", "start", "cmd.exe", "/k", cmd], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
   } else if (process.platform === "linux") {
     // Linux: try common terminal emulators
-    const cmd = `cd "${cwd}" && claude -r ${sessionId}`;
-    // Try xterm as a widely available fallback
+    // Use bash -c with properly escaped arguments
+    const safeCwd = escapeShellArg(cwd);
+    const cmd = `cd ${safeCwd} && claude -r ${sessionId}; exec bash`;
+
     const terminals = [
-      { cmd: "gnome-terminal", args: ["--", "bash", "-c", cmd] },
-      { cmd: "konsole", args: ["-e", "bash", "-c", cmd] },
-      { cmd: "xterm", args: ["-e", `bash -c '${cmd.replace(/'/g, "'\\''")}'`] },
+      { bin: "gnome-terminal", args: ["--", "bash", "-c", cmd] },
+      { bin: "konsole", args: ["-e", "bash", "-c", cmd] },
+      { bin: "xterm", args: ["-e", "bash", "-c", cmd] },
     ];
 
     function tryTerminal(index: number) {
@@ -39,7 +46,7 @@ function openSessionInTerminal(cwd: string, sessionId: string) {
         return;
       }
       const t = terminals[index];
-      execFile(t.cmd, t.args, (err) => {
+      execFile(t.bin, t.args, (err) => {
         if (err) tryTerminal(index + 1);
       });
     }
