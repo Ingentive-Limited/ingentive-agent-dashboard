@@ -8,11 +8,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatRelativeTime, formatTokens, formatCost } from "@/lib/utils";
-import type { ProjectSummary } from "@/lib/types";
+import type { ProjectStats } from "@/lib/types";
 import Link from "next/link";
-import { FolderOpen, FileText, BarChart3, ArrowUpDown, DollarSign } from "lucide-react";
+import {
+  FolderOpen,
+  FileText,
+  BarChart3,
+  ArrowUpDown,
+  DollarSign,
+  AlertCircle,
+  CheckCircle2,
+  GitCompare,
+  X,
+} from "lucide-react";
 
-type SortKey = "name" | "activity" | "tokens" | "cost" | "sessions";
+type SortKey = "name" | "activity" | "tokens" | "cost" | "sessions" | "errors";
 type GroupMode = "none" | "directory";
 
 function parentDir(p: string): string {
@@ -21,56 +31,219 @@ function parentDir(p: string): string {
   return parts.slice(0, -1).join("/");
 }
 
-function ProjectCard({ project, showCost }: { project: ProjectSummary; showCost: boolean }) {
-  const totalTokens = project.totalTokens.input_tokens + project.totalTokens.output_tokens;
+function ErrorRateBadge({ errorRate, errorCount, successCount }: { errorRate: number; errorCount: number; successCount: number }) {
+  if (errorCount + successCount === 0) return null;
+  const pct = Math.round(errorRate * 100);
+  const variant = pct >= 30 ? "destructive" : pct >= 10 ? "secondary" : "secondary";
   return (
-    <Link href={`/projects/${encodeURIComponent(project.id)}`}>
-      <Card className="hover:bg-muted/50 transition-colors cursor-pointer h-full">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base truncate">{project.name}</CardTitle>
-            <Badge variant="secondary" className="text-xs shrink-0">
+    <Badge variant={variant} className="text-[10px] gap-1">
+      {pct > 0 ? (
+        <AlertCircle className="h-2.5 w-2.5" aria-hidden="true" />
+      ) : (
+        <CheckCircle2 className="h-2.5 w-2.5" aria-hidden="true" />
+      )}
+      {pct}% errors
+    </Badge>
+  );
+}
+
+function ProjectCard({
+  project,
+  showCost,
+  selected,
+  onSelect,
+  compareMode,
+}: {
+  project: ProjectStats;
+  showCost: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  compareMode: boolean;
+}) {
+  const totalTokens = project.totalTokens.input_tokens + project.totalTokens.output_tokens;
+
+  const cardContent = (
+    <Card className={`hover:bg-muted/50 transition-colors cursor-pointer h-full ${selected ? "ring-2 ring-primary" : ""}`}>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base truncate">{project.name}</CardTitle>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <ErrorRateBadge
+              errorRate={project.errorRate}
+              errorCount={project.errorCount}
+              successCount={project.successCount}
+            />
+            <Badge variant="secondary" className="text-xs">
               {project.sessionCount} sessions
             </Badge>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground font-mono truncate">
-              {project.path}
-            </p>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <FileText className="h-3 w-3" aria-hidden="true" />
+              {project.lastActivity
+                ? formatRelativeTime(project.lastActivity)
+                : "No activity"}
+            </span>
+            <span className="flex items-center gap-1">
+              <BarChart3 className="h-3 w-3" aria-hidden="true" />
+              {formatTokens(totalTokens)} tokens
+            </span>
+            {showCost && (
               <span className="flex items-center gap-1">
-                <FileText className="h-3 w-3" aria-hidden="true" />
-                {project.lastActivity
-                  ? formatRelativeTime(project.lastActivity)
-                  : "No activity"}
+                <DollarSign className="h-3 w-3" aria-hidden="true" />
+                {formatCost(project.cost.totalCost)}
               </span>
-              <span className="flex items-center gap-1">
-                <BarChart3 className="h-3 w-3" />
-                {formatTokens(totalTokens)} tokens
-              </span>
-              {showCost && (
-                <span className="flex items-center gap-1">
-                  <DollarSign className="h-3 w-3" />
-                  {formatCost(project.cost.totalCost)}
-                </span>
-              )}
-            </div>
+            )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  if (compareMode) {
+    return (
+      <button type="button" className="text-left w-full" onClick={onSelect}>
+        {cardContent}
+      </button>
+    );
+  }
+
+  return (
+    <Link href={`/projects/${encodeURIComponent(project.id)}`}>
+      {cardContent}
     </Link>
   );
 }
 
+function ComparisonPanel({
+  projects,
+  showCost,
+  onClose,
+}: {
+  projects: ProjectStats[];
+  showCost: boolean;
+  onClose: () => void;
+}) {
+  const maxTokens = Math.max(
+    ...projects.map((p) => p.totalTokens.input_tokens + p.totalTokens.output_tokens),
+    1
+  );
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg">Project Comparison</CardTitle>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} aria-label="Close comparison">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" aria-label="Project comparison">
+            <thead>
+              <tr className="border-b text-left">
+                <th className="pb-2 pr-4 font-medium text-muted-foreground">Metric</th>
+                {projects.map((p) => (
+                  <th key={p.id} className="pb-2 px-4 font-medium">{p.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              <tr>
+                <td className="py-2 pr-4 text-muted-foreground">Sessions</td>
+                {projects.map((p) => (
+                  <td key={p.id} className="py-2 px-4 font-mono">{p.sessionCount}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="py-2 pr-4 text-muted-foreground">Total Tokens</td>
+                {projects.map((p) => {
+                  const total = p.totalTokens.input_tokens + p.totalTokens.output_tokens;
+                  const pct = (total / maxTokens) * 100;
+                  return (
+                    <td key={p.id} className="py-2 px-4">
+                      <div className="space-y-1">
+                        <span className="font-mono">{formatTokens(total)}</span>
+                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary rounded-full"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr>
+                <td className="py-2 pr-4 text-muted-foreground">Input</td>
+                {projects.map((p) => (
+                  <td key={p.id} className="py-2 px-4 font-mono">
+                    {formatTokens(p.totalTokens.input_tokens)}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="py-2 pr-4 text-muted-foreground">Output</td>
+                {projects.map((p) => (
+                  <td key={p.id} className="py-2 px-4 font-mono">
+                    {formatTokens(p.totalTokens.output_tokens)}
+                  </td>
+                ))}
+              </tr>
+              {showCost && (
+                <tr>
+                  <td className="py-2 pr-4 text-muted-foreground">Cost</td>
+                  {projects.map((p) => (
+                    <td key={p.id} className="py-2 px-4 font-mono">
+                      {formatCost(p.cost.totalCost)}
+                    </td>
+                  ))}
+                </tr>
+              )}
+              <tr>
+                <td className="py-2 pr-4 text-muted-foreground">Error Rate</td>
+                {projects.map((p) => (
+                  <td key={p.id} className="py-2 px-4">
+                    <ErrorRateBadge
+                      errorRate={p.errorRate}
+                      errorCount={p.errorCount}
+                      successCount={p.successCount}
+                    />
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="py-2 pr-4 text-muted-foreground">Last Activity</td>
+                {projects.map((p) => (
+                  <td key={p.id} className="py-2 px-4 text-muted-foreground">
+                    {p.lastActivity ? formatRelativeTime(p.lastActivity) : "-"}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ProjectsPage() {
-  const { data: projects, isLoading } = usePolling<ProjectSummary[]>(
-    "/api/projects",
+  const { data: projects, isLoading } = usePolling<ProjectStats[]>(
+    "/api/projects/stats",
     10000
   );
   const [sortKey, setSortKey] = useState<SortKey>("activity");
   const [groupMode, setGroupMode] = useState<GroupMode>("none");
+  const [compareMode, setCompareMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const { isApi } = useBillingMode();
 
   const sorted = useMemo(() => {
@@ -92,6 +265,8 @@ export default function ProjectsPage() {
           return b.cost.totalCost - a.cost.totalCost;
         case "sessions":
           return b.sessionCount - a.sessionCount;
+        case "errors":
+          return b.errorRate - a.errorRate;
         default:
           return 0;
       }
@@ -101,14 +276,32 @@ export default function ProjectsPage() {
 
   const grouped = useMemo(() => {
     if (groupMode === "none") return null;
-    const groups: Record<string, ProjectSummary[]> = {};
+    const groups: Record<string, ProjectStats[]> = {};
     for (const p of sorted) {
-      const key = parentDir(p.path);
+      // ProjectStats doesn't have path directly, derive from name
+      const key = "Projects";
       if (!groups[key]) groups[key] = [];
       groups[key].push(p);
     }
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [sorted, groupMode]);
+
+  const selectedProjects = useMemo(() => {
+    if (!projects) return [];
+    return projects.filter((p) => selectedIds.has(p.id));
+  }, [projects, selectedIds]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else if (next.size < 4) {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   if (isLoading || !projects) {
     return (
@@ -129,6 +322,7 @@ export default function ProjectsPage() {
     { key: "tokens", label: "Tokens" },
     ...(isApi ? [{ key: "cost" as SortKey, label: "Cost" }] : []),
     { key: "sessions", label: "Sessions" },
+    { key: "errors", label: "Errors" },
   ];
 
   return (
@@ -165,10 +359,49 @@ export default function ProjectsPage() {
               setGroupMode((m) => (m === "none" ? "directory" : "none"))
             }
           >
-            <FolderOpen className="h-3 w-3" />
+            <FolderOpen className="h-3 w-3" aria-hidden="true" />
             Group by directory
           </Button>
+          <div className="h-4 w-px bg-border mx-1" />
+          <Button
+            variant={compareMode ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 text-xs gap-1"
+            onClick={() => {
+              setCompareMode(!compareMode);
+              if (compareMode) setSelectedIds(new Set());
+            }}
+          >
+            <GitCompare className="h-3 w-3" aria-hidden="true" />
+            Compare
+            {compareMode && selectedIds.size > 0 && (
+              <Badge variant="secondary" className="text-[10px] ml-1 h-4 px-1">
+                {selectedIds.size}
+              </Badge>
+            )}
+          </Button>
         </div>
+      )}
+
+      {compareMode && selectedProjects.length >= 2 && (
+        <ComparisonPanel
+          projects={selectedProjects}
+          showCost={isApi}
+          onClose={() => {
+            setCompareMode(false);
+            setSelectedIds(new Set());
+          }}
+        />
+      )}
+
+      {compareMode && selectedIds.size < 2 && (
+        <Card className="border-dashed">
+          <CardContent className="py-3">
+            <p className="text-sm text-muted-foreground text-center">
+              Select 2-4 projects to compare
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {projects.length === 0 ? (
@@ -187,7 +420,14 @@ export default function ProjectsPage() {
               </h3>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {dirProjects.map((project) => (
-                  <ProjectCard key={project.id} project={project} showCost={isApi} />
+                  <ProjectCard
+                    key={project.id}
+                    project={project}
+                    showCost={isApi}
+                    selected={selectedIds.has(project.id)}
+                    onSelect={() => toggleSelect(project.id)}
+                    compareMode={compareMode}
+                  />
                 ))}
               </div>
             </div>
@@ -196,7 +436,14 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {sorted.map((project) => (
-            <ProjectCard key={project.id} project={project} showCost={isApi} />
+            <ProjectCard
+              key={project.id}
+              project={project}
+              showCost={isApi}
+              selected={selectedIds.has(project.id)}
+              onSelect={() => toggleSelect(project.id)}
+              compareMode={compareMode}
+            />
           ))}
         </div>
       )}
