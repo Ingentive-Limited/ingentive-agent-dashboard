@@ -26,19 +26,19 @@ import {
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 const monitorLinks = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/sessions", label: "Sessions", icon: Terminal },
-  { href: "/awaiting", label: "Awaiting Input", icon: Bell },
-  { href: "/projects", label: "Projects", icon: FolderOpen },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard, shortcut: "⌘1" },
+  { href: "/sessions", label: "Sessions", icon: Terminal, shortcut: "⌘2" },
+  { href: "/awaiting", label: "Awaiting Input", icon: Bell, shortcut: "⌘3" },
+  { href: "/projects", label: "Projects", icon: FolderOpen, shortcut: "⌘4" },
 ];
 
 const analyticsLinks = [
-  { href: "/tokens", label: "Token Usage", icon: BarChart3 },
-  { href: "/history", label: "Session History", icon: History },
+  { href: "/tokens", label: "Token Usage", icon: BarChart3, shortcut: "⌘5" },
+  { href: "/history", label: "Session History", icon: History, shortcut: "⌘6" },
 ];
 
 const automationLinks = [
-  { href: "/tasks", label: "Scheduled Tasks", icon: Clock },
+  { href: "/tasks", label: "Scheduled Tasks", icon: Clock, shortcut: "⌘7" },
 ];
 
 function NavGroup({
@@ -47,7 +47,7 @@ function NavGroup({
   isActive,
 }: {
   label: string;
-  links: typeof monitorLinks;
+  links: Array<{ href: string; label: string; icon: React.ComponentType<{ className?: string }>; shortcut?: string }>;
   isActive: (href: string) => boolean;
 }) {
   return (
@@ -62,7 +62,12 @@ function NavGroup({
                 render={<Link href={link.href} />}
               >
                 <link.icon className="h-4 w-4" aria-hidden="true" />
-                <span>{link.label}</span>
+                <span className="flex-1">{link.label}</span>
+                {"shortcut" in link && (
+                  <kbd className="ml-auto text-[10px] text-muted-foreground/60 font-mono" aria-hidden="true">
+                    {link.shortcut}
+                  </kbd>
+                )}
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}
