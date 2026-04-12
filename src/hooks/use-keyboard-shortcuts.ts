@@ -33,8 +33,7 @@ export function useKeyboardShortcuts() {
         target.tagName === "TEXTAREA" ||
         target.isContentEditable
       ) {
-        // Allow Escape in inputs
-        if (e.key !== "Escape") return;
+        return;
       }
 
       // ⌘/Ctrl + 1-7: Navigate to pages
@@ -44,17 +43,6 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           router.push(NAV_ROUTES[index]);
         }
-        return;
-      }
-
-      // Escape: Go back (only when not in a dialog/modal)
-      if (e.key === "Escape" && !meta) {
-        // Don't interfere with dialogs/modals
-        const openDialog = document.querySelector("[role='dialog']");
-        if (openDialog) return;
-
-        e.preventDefault();
-        router.back();
         return;
       }
     }

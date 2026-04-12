@@ -69,35 +69,11 @@ function ProjectCard({
 }) {
   const totalTokens = project.totalTokens.input_tokens + project.totalTokens.output_tokens;
 
-  const handleFavoriteClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    onToggleFavorite();
-  };
-
-  const cardContent = (
+  const cardInner = (
     <Card className={`hover:bg-muted/50 transition-colors cursor-pointer h-full ${selected ? "ring-2 ring-primary" : ""}`}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              type="button"
-              onClick={handleFavoriteClick}
-              className="shrink-0 hover:scale-110 transition-transform"
-              aria-label={isFavorite ? `Unpin ${project.name}` : `Pin ${project.name}`}
-              title={isFavorite ? "Unpin project" : "Pin project"}
-            >
-              <Star
-                className={`h-4 w-4 ${
-                  isFavorite
-                    ? "fill-amber-400 text-amber-400"
-                    : "text-muted-foreground/30 hover:text-amber-400/60"
-                }`}
-                aria-hidden="true"
-              />
-            </button>
-            <CardTitle className="text-base truncate">{project.name}</CardTitle>
-          </div>
+          <CardTitle className="text-base truncate">{project.name}</CardTitle>
           <div className="flex items-center gap-1.5 shrink-0">
             <ErrorRateBadge
               errorRate={project.errorRate}
@@ -135,18 +111,39 @@ function ProjectCard({
     </Card>
   );
 
-  if (compareMode) {
-    return (
-      <button type="button" className="text-left w-full" onClick={onSelect}>
-        {cardContent}
-      </button>
-    );
-  }
-
+  // Wrap card in a relative container with the star button positioned outside the link
   return (
-    <Link href={`/projects/${encodeURIComponent(project.id)}`}>
-      {cardContent}
-    </Link>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onToggleFavorite();
+        }}
+        className="absolute top-3 left-3 z-10 shrink-0 hover:scale-110 transition-transform"
+        aria-label={isFavorite ? `Unpin ${project.name}` : `Pin ${project.name}`}
+        title={isFavorite ? "Unpin project" : "Pin project"}
+      >
+        <Star
+          className={`h-4 w-4 ${
+            isFavorite
+              ? "fill-amber-400 text-amber-400"
+              : "text-muted-foreground/30 hover:text-amber-400/60"
+          }`}
+          aria-hidden="true"
+        />
+      </button>
+      {compareMode ? (
+        <button type="button" className="text-left w-full pl-0" onClick={onSelect}>
+          <div className="pl-6">{cardInner}</div>
+        </button>
+      ) : (
+        <Link href={`/projects/${encodeURIComponent(project.id)}`}>
+          <div className="pl-6">{cardInner}</div>
+        </Link>
+      )}
+    </div>
   );
 }
 
@@ -201,7 +198,14 @@ function ComparisonPanel({
                     <td key={p.id} className="py-2 px-4">
                       <div className="space-y-1">
                         <span className="font-mono">{formatTokens(total)}</span>
-                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="w-full h-1.5 bg-muted rounded-full overflow-hidden"
+                          role="meter"
+                          aria-valuenow={total}
+                          aria-valuemin={0}
+                          aria-valuemax={maxTokens}
+                          aria-label={`Token usage: ${formatTokens(total)}`}
+                        >
                           <div
                             className="h-full bg-primary rounded-full"
                             style={{ width: `${pct}%` }}
@@ -342,13 +346,14 @@ export default function ProjectsPage() {
 
   if (isLoading || !projects) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" role="status" aria-label="Loading projects">
         <h1 className="text-2xl font-bold">Projects</h1>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[...Array(6)].map((_, i) => (
             <Skeleton key={i} className="h-40" />
           ))}
         </div>
+        <span className="sr-only">Loading projects...</span>
       </div>
     );
   }
@@ -373,8 +378,8 @@ export default function ProjectsPage() {
 
       {projects.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1">
-            <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <div className="flex items-center gap-1" role="radiogroup" aria-label="Sort by">
+            <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             {sortOptions.map((opt) => (
               <Button
                 key={opt.key}
@@ -382,6 +387,8 @@ export default function ProjectsPage() {
                 size="sm"
                 className="h-7 text-xs"
                 onClick={() => setSortKey(opt.key)}
+                role="radio"
+                aria-checked={sortKey === opt.key}
               >
                 {opt.label}
               </Button>
@@ -395,6 +402,7 @@ export default function ProjectsPage() {
             onClick={() =>
               setGroupMode((m) => (m === "none" ? "directory" : "none"))
             }
+            aria-pressed={groupMode === "directory"}
           >
             <FolderOpen className="h-3 w-3" aria-hidden="true" />
             Group by directory
@@ -408,6 +416,7 @@ export default function ProjectsPage() {
               setCompareMode(!compareMode);
               if (compareMode) setSelectedIds(new Set());
             }}
+            aria-pressed={compareMode}
           >
             <GitCompare className="h-3 w-3" aria-hidden="true" />
             Compare

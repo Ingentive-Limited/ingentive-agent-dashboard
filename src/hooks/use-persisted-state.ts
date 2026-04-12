@@ -18,7 +18,14 @@ export function usePersistedState<T>(
     try {
       const stored = localStorage.getItem(key);
       if (stored !== null) {
-        setState(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        // Reject objects with prototype-polluting keys
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          delete parsed.__proto__;
+          delete parsed.constructor;
+          delete parsed.prototype;
+        }
+        setState(parsed);
       }
     } catch {
       // ignore parse errors

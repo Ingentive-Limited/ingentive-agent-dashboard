@@ -294,9 +294,11 @@ export default function DashboardPage() {
           {data.recentSessions.length > 0 && (
             <Link
               href="/sessions"
-              className="mt-3 inline-block text-xs text-muted-foreground hover:text-foreground"
+              className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              aria-label="View all sessions"
             >
-              View all sessions &rarr;
+              View all sessions
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
             </Link>
           )}
         </CardContent>

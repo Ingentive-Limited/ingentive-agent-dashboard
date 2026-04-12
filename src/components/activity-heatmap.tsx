@@ -113,6 +113,7 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
           role="img"
           aria-label={`Activity heatmap showing token usage over the last ${WEEKS_TO_SHOW} weeks`}
           onMouseLeave={() => setHover(null)}
+          focusable="false"
         >
           {/* Month labels */}
           {months.map((m, i) => (
@@ -148,6 +149,15 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
               const x = labelWidth + wi * (cellSize + cellGap);
               const y = headerHeight + dayOfWeek * (cellSize + cellGap);
 
+              const dateLabel = day.dateObj.toLocaleDateString(undefined, {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              });
+              const valueLabel = day.value === 0
+                ? "No activity"
+                : `${formatTokensShort(day.value)} tokens`;
+
               return (
                 <rect
                   key={day.date}
@@ -157,19 +167,27 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
                   height={cellSize}
                   rx={2}
                   fill={day.value === 0 ? emptyColor : colors[intensity]}
-                  className="cursor-pointer transition-opacity hover:opacity-80"
+                  className="cursor-pointer transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  tabIndex={0}
+                  role="gridcell"
+                  aria-label={`${dateLabel}: ${valueLabel}`}
                   onMouseEnter={() =>
                     setHover({
-                      date: day.dateObj.toLocaleDateString(undefined, {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                      }),
+                      date: dateLabel,
                       value: day.value,
                       x: x + cellSize / 2,
                       y,
                     })
                   }
+                  onFocus={() =>
+                    setHover({
+                      date: dateLabel,
+                      value: day.value,
+                      x: x + cellSize / 2,
+                      y,
+                    })
+                  }
+                  onBlur={() => setHover(null)}
                 />
               );
             })

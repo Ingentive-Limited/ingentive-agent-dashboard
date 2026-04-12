@@ -211,31 +211,21 @@ export default function HistoryPage() {
               {history.map((session) => (
                 <Fragment key={session.sessionId}>
                   <TableRow
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => toggleExpand(session.sessionId)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        toggleExpand(session.sessionId);
-                      }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                    aria-expanded={expanded.has(session.sessionId)}
-                    aria-label={`${session.projectName} session — ${session.status}. Click to ${expanded.has(session.sessionId) ? "collapse" : "expand"} details.`}
+                    className="hover:bg-muted/50"
                   >
                     <TableCell>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        aria-hidden="true"
-                        tabIndex={-1}
+                        onClick={() => toggleExpand(session.sessionId)}
+                        aria-expanded={expanded.has(session.sessionId)}
+                        aria-label={`${expanded.has(session.sessionId) ? "Collapse" : "Expand"} ${session.projectName} session details`}
                       >
                         {expanded.has(session.sessionId) ? (
-                          <ChevronDown className="h-4 w-4" />
+                          <ChevronDown className="h-4 w-4" aria-hidden="true" />
                         ) : (
-                          <ChevronRight className="h-4 w-4" />
+                          <ChevronRight className="h-4 w-4" aria-hidden="true" />
                         )}
                       </Button>
                     </TableCell>

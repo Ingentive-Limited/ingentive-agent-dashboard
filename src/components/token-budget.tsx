@@ -27,10 +27,12 @@ function parseLimit(value: string): number {
 }
 
 function ProgressBar({
+  label,
   percent,
   alert,
   exceeded,
 }: {
+  label: string;
   percent: number;
   alert: boolean;
   exceeded: boolean;
@@ -51,6 +53,7 @@ function ProgressBar({
         aria-valuenow={Math.round(percent)}
         aria-valuemin={0}
         aria-valuemax={100}
+        aria-label={label}
       />
     </div>
   );
@@ -191,6 +194,7 @@ export function TokenBudgetCard({
                   </span>
                 </div>
                 <ProgressBar
+                  label="Daily token budget usage"
                   percent={status.dailyPercent}
                   alert={status.dailyAlert}
                   exceeded={status.dailyExceeded}
@@ -208,6 +212,7 @@ export function TokenBudgetCard({
                   </span>
                 </div>
                 <ProgressBar
+                  label="Monthly token budget usage"
                   percent={status.monthlyPercent}
                   alert={status.monthlyAlert}
                   exceeded={status.monthlyExceeded}
@@ -224,13 +229,14 @@ export function TokenBudgetCard({
 
           {settingsOpen && (
             <div className="space-y-4 rounded-lg border p-4" role="region" aria-label="Budget settings">
-              <label className="flex items-center justify-between">
-                <span className="text-sm font-medium">Enable budget tracking</span>
+              <div className="flex items-center justify-between">
+                <span id="budget-toggle-label" className="text-sm font-medium">Enable budget tracking</span>
                 <Switch
                   checked={budget.enabled}
                   onCheckedChange={(checked) => update({ enabled: !!checked })}
+                  aria-labelledby="budget-toggle-label"
                 />
-              </label>
+              </div>
 
               <div className="space-y-2">
                 <label className="text-sm text-muted-foreground" htmlFor="daily-limit">

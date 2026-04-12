@@ -202,7 +202,7 @@ export default function TokensPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Token Usage</h1>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" role="radiogroup" aria-label="Date range">
             {dateRanges.map((r) => (
               <Button
                 key={r.value}
@@ -210,6 +210,8 @@ export default function TokensPage() {
                 size="sm"
                 className="h-7 text-xs"
                 onClick={() => setDateRange(r.value)}
+                role="radio"
+                aria-checked={dateRange === r.value}
               >
                 {r.label}
               </Button>

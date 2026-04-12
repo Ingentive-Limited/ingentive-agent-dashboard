@@ -101,9 +101,10 @@ export default function SessionsPage() {
 
   if (isLoading || !sessions) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" role="status" aria-label="Loading sessions">
         <h1 className="text-2xl font-bold">Sessions</h1>
         <Skeleton className="h-96" />
+        <span className="sr-only">Loading sessions...</span>
       </div>
     );
   }
@@ -114,9 +115,14 @@ export default function SessionsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Sessions</h1>
-        <span className="text-sm text-muted-foreground">
+        <span className="text-sm text-muted-foreground" aria-live="polite" aria-atomic="true">
           {aliveSessions.length} active
         </span>
+      </div>
+
+      {/* Screen reader announcement for selection changes */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {hasSelection ? `${selectedPids.size} sessions selected. Bulk actions available.` : ""}
       </div>
 
       {/* Bulk action bar */}
@@ -217,7 +223,7 @@ export default function SessionsPage() {
                       {session.entrypoint === "claude-desktop" ? "Desktop" : "CLI"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="max-w-[300px] truncate text-xs text-muted-foreground font-mono">
+                  <TableCell className="max-w-[300px] truncate text-xs text-muted-foreground font-mono" title={session.cwd}>
                     {session.cwd}
                   </TableCell>
                   <TableCell>

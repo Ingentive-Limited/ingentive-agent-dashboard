@@ -14,7 +14,8 @@ export function downloadFile(
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // Defer revocation to ensure download completes in all browsers
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 /**
@@ -38,6 +39,11 @@ export function toCSV(
 }
 
 function escapeCSV(value: string): string {
+  // Neutralize CSV formula injection — prefix with single quote if value
+  // starts with characters that spreadsheets interpret as formulas
+  if (/^[=+\-@\t\r]/.test(value)) {
+    value = "'" + value;
+  }
   if (value.includes(",") || value.includes('"') || value.includes("\n")) {
     return `"${value.replace(/"/g, '""')}"`;
   }

@@ -290,7 +290,26 @@ function getSessionStatus(lastEntry: Record<string, unknown>): {
 function isWithinDir(filePath: string, baseDir: string): boolean {
   const resolved = path.resolve(filePath);
   const resolvedBase = path.resolve(baseDir) + path.sep;
-  return resolved.startsWith(resolvedBase) || resolved === path.resolve(baseDir);
+  if (!(resolved.startsWith(resolvedBase) || resolved === path.resolve(baseDir))) {
+    return false;
+  }
+  // Also resolve symlinks and check real path to prevent symlink-based escapes
+  try {
+    const realPath = fs.realpathSync(resolved);
+    const realBase = fs.realpathSync(baseDir) + path.sep;
+    return realPath.startsWith(realBase) || realPath === fs.realpathSync(baseDir);
+  } catch {
+    // If realpath fails (e.g., file doesn't exist yet), fall back to resolved check
+    return true;
+  }
+}
+
+/**
+ * Read the last N lines of a JSONL conversation file.
+ * Exported for use by the conversation API route to avoid full-file streaming.
+ */
+export async function readConversationLines(filePath: string, n: number): Promise<string[]> {
+  return readLastLines(filePath, n);
 }
 
 // Get the session's JSONL file path by matching sessionId to project files

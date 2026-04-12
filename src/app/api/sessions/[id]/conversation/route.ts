@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
-import readline from "readline";
-import { findSessionJsonl } from "@/lib/claude-data";
+import { findSessionJsonl, readConversationLines } from "@/lib/claude-data";
 
 export const dynamic = "force-dynamic";
 
@@ -81,12 +80,12 @@ export async function GET(
   }
 
   try {
+    // Read only the last ~600 lines (3x max messages) to avoid streaming
+    // entire multi-hundred-MB files for long-running sessions
+    const lines = await readConversationLines(jsonlPath, MAX_MESSAGES * 3);
     const messages: Record<string, unknown>[] = [];
 
-    const stream = fs.createReadStream(jsonlPath, { encoding: "utf-8" });
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-
-    for await (const line of rl) {
+    for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line);

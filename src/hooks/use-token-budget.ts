@@ -24,7 +24,13 @@ function loadBudget(): TokenBudget {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_BUDGET;
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_BUDGET, ...parsed };
+    // Validate schema: only accept known keys with correct types
+    return {
+      enabled: typeof parsed.enabled === "boolean" ? parsed.enabled : DEFAULT_BUDGET.enabled,
+      dailyLimit: typeof parsed.dailyLimit === "number" && parsed.dailyLimit > 0 ? parsed.dailyLimit : DEFAULT_BUDGET.dailyLimit,
+      monthlyLimit: typeof parsed.monthlyLimit === "number" && parsed.monthlyLimit > 0 ? parsed.monthlyLimit : DEFAULT_BUDGET.monthlyLimit,
+      alertThreshold: typeof parsed.alertThreshold === "number" && parsed.alertThreshold >= 1 && parsed.alertThreshold <= 100 ? parsed.alertThreshold : DEFAULT_BUDGET.alertThreshold,
+    };
   } catch {
     return DEFAULT_BUDGET;
   }

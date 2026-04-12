@@ -1,7 +1,22 @@
 import { NextResponse } from "next/server";
+import { execFileSync } from "child_process";
 import { getActiveSessions } from "@/lib/claude-data";
 
 export const dynamic = "force-dynamic";
+
+/** Verify the PID is still a Claude process right before kill (mitigate TOCTOU). */
+function verifyClaudeProcess(pid: number): boolean {
+  try {
+    // Use execFileSync (no shell) to safely check the process name
+    const result = execFileSync("ps", ["-p", String(pid), "-o", "comm="], {
+      timeout: 2000,
+      encoding: "utf-8",
+    }).trim().toLowerCase();
+    return result.includes("claude") || result.includes("node");
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -21,6 +36,14 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Not a known Claude session" },
         { status: 403 }
+      );
+    }
+
+    // Re-verify process name immediately before kill to reduce TOCTOU window
+    if (!verifyClaudeProcess(pid)) {
+      return NextResponse.json(
+        { error: "Process is no longer a Claude session" },
+        { status: 409 }
       );
     }
 

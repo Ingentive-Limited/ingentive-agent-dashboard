@@ -178,7 +178,7 @@ export function ConversationViewer({
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
     if (!open || !sessionId) return;
@@ -261,12 +261,14 @@ export function ConversationViewer({
               <p className="text-sm text-muted-foreground">No messages found</p>
             </div>
           ) : (
-            <div className="space-y-4 py-4">
+            <ul className="space-y-4 py-4 list-none" role="list" aria-label="Conversation messages">
               {messages.map((msg, i) => (
-                <MessageBubble key={i} message={msg} />
+                <li key={i}>
+                  <MessageBubble message={msg} />
+                </li>
               ))}
-              <div ref={bottomRef} />
-            </div>
+              <li ref={bottomRef} aria-hidden="true" />
+            </ul>
           )}
         </ScrollArea>
       </SheetContent>

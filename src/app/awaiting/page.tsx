@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import {
   useAwaitingNotifications,
@@ -40,65 +40,129 @@ function killSession(pid: number): Promise<boolean> {
 function NotificationSettings() {
   const { prefs, update } = useNotificationPreferences();
   const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  if (!open) {
-    return (
+  // Focus trap and Escape handler
+  useEffect(() => {
+    if (!open || !dialogRef.current) return;
+
+    // Move focus into the dialog
+    const firstFocusable = dialogRef.current.querySelector<HTMLElement>(
+      'button, input, [tabindex]:not([tabindex="-1"])'
+    );
+    firstFocusable?.focus();
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+        return;
+      }
+      // Trap focus within the dialog
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, input, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    // Close on click outside
+    function handleClickOutside(e: MouseEvent) {
+      if (dialogRef.current && !dialogRef.current.contains(e.target as Node) &&
+          triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [open]);
+
+  return (
+    <>
       <Button
+        ref={triggerRef}
         variant="ghost"
         size="icon"
         className="h-8 w-8"
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen(!open)}
         aria-label="Notification settings"
+        aria-expanded={open}
+        aria-haspopup="dialog"
         title="Notification settings"
       >
         <Settings2 className="h-4 w-4" aria-hidden="true" />
       </Button>
-    );
-  }
-
-  return (
-    <Card className="absolute right-0 top-full mt-1 z-10 w-64" role="dialog" aria-label="Notification settings">
-      <CardContent className="p-3 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Notification Settings</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 text-xs"
-            onClick={() => setOpen(false)}
-          >
-            Close
-          </Button>
-        </div>
-        <label className="flex items-center justify-between cursor-pointer">
-          <span className="text-sm">Sound</span>
-          <input
-            type="checkbox"
-            checked={prefs.sound}
-            onChange={(e) => update({ sound: e.target.checked })}
-            className="accent-primary h-4 w-4"
-          />
-        </label>
-        <label className="flex items-center justify-between cursor-pointer">
-          <span className="text-sm">Awaiting input</span>
-          <input
-            type="checkbox"
-            checked={prefs.awaitingInput}
-            onChange={(e) => update({ awaitingInput: e.target.checked })}
-            className="accent-primary h-4 w-4"
-          />
-        </label>
-        <label className="flex items-center justify-between cursor-pointer">
-          <span className="text-sm">Needs attention</span>
-          <input
-            type="checkbox"
-            checked={prefs.needsAttention}
-            onChange={(e) => update({ needsAttention: e.target.checked })}
-            className="accent-primary h-4 w-4"
-          />
-        </label>
-      </CardContent>
-    </Card>
+      {open && (
+        <Card
+          ref={dialogRef}
+          className="absolute right-0 top-full mt-1 z-10 w-64"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Notification settings"
+        >
+          <CardContent className="p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium" id="notif-settings-title">Notification Settings</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs"
+                onClick={() => {
+                  setOpen(false);
+                  triggerRef.current?.focus();
+                }}
+                aria-label="Close notification settings"
+              >
+                Close
+              </Button>
+            </div>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Sound</span>
+              <input
+                type="checkbox"
+                checked={prefs.sound}
+                onChange={(e) => update({ sound: e.target.checked })}
+                className="accent-primary h-4 w-4"
+              />
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Awaiting input</span>
+              <input
+                type="checkbox"
+                checked={prefs.awaitingInput}
+                onChange={(e) => update({ awaitingInput: e.target.checked })}
+                className="accent-primary h-4 w-4"
+              />
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm">Needs attention</span>
+              <input
+                type="checkbox"
+                checked={prefs.needsAttention}
+                onChange={(e) => update({ needsAttention: e.target.checked })}
+                className="accent-primary h-4 w-4"
+              />
+            </label>
+          </CardContent>
+        </Card>
+      )}
+    </>
   );
 }
 
@@ -155,9 +219,10 @@ export default function AwaitingPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" role="status" aria-label="Loading awaiting input sessions">
         <h1 className="text-2xl font-bold">Awaiting Input</h1>
         <Skeleton className="h-64" />
+        <span className="sr-only">Loading awaiting input sessions...</span>
       </div>
     );
   }
