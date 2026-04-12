@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Terminal, Bell, BarChart3, FolderOpen, Clock, DollarSign } from "lucide-react";
+import { Terminal, BarChart3, FolderOpen, Clock, DollarSign } from "lucide-react";
 import { formatTokens, formatCost } from "@/lib/utils";
 import type { DashboardOverview } from "@/lib/types";
 
@@ -15,7 +15,7 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
     data.totalTokensToday.input_tokens + data.totalTokensToday.output_tokens;
 
   return (
-    <div className={`grid gap-4 md:grid-cols-2 ${showCost ? "lg:grid-cols-6" : "lg:grid-cols-5"}`}>
+    <div className={`grid gap-4 md:grid-cols-2 ${showCost ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
@@ -25,31 +25,6 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
           <div className="text-2xl font-bold">{data.activeSessions}</div>
           <p className="text-xs text-muted-foreground">
             {data.activeSessions === 1 ? "session" : "sessions"} running
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card className={data.awaitingInput > 0 ? "border-amber-500/50" : ""}>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Awaiting Input</CardTitle>
-          <Bell
-            className={`h-4 w-4 ${
-              data.awaitingInput > 0
-                ? "text-amber-500 animate-pulse"
-                : "text-muted-foreground"
-            }`}
-          />
-        </CardHeader>
-        <CardContent>
-          <div
-            className={`text-2xl font-bold ${
-              data.awaitingInput > 0 ? "text-amber-500" : ""
-            }`}
-          >
-            {data.awaitingInput}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {data.awaitingInput === 1 ? "session needs" : "sessions need"} attention
           </p>
         </CardContent>
       </Card>
