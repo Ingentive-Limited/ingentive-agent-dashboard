@@ -3,6 +3,7 @@
 import { usePolling } from "@/hooks/use-polling";
 import { useAwaitingNotifications } from "@/hooks/use-notifications";
 import { OverviewCards } from "@/components/overview-cards";
+import { TokenChart } from "@/components/token-chart";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +12,7 @@ import { formatDuration } from "@/lib/utils";
 import type { DashboardOverview, ClaudeSession } from "@/lib/types";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, Bell } from "lucide-react";
+import { ExternalLink, Bell, ArrowRight } from "lucide-react";
 
 function openSession(session: ClaudeSession) {
   fetch("/api/sessions/open", {
@@ -91,21 +92,46 @@ export default function DashboardPage() {
       {awaitingSessions.length > 0 && (
         <Card className="border-amber-500/50">
           <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <Bell className="h-4 w-4 text-amber-500" />
-              <CardTitle className="text-lg">Awaiting Input</CardTitle>
-              <Badge variant="secondary" className="text-xs">
-                {awaitingSessions.length}
-              </Badge>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Bell className="h-4 w-4 text-amber-500" />
+                <CardTitle className="text-lg">Awaiting Input</CardTitle>
+                <Badge variant="secondary" className="text-xs">
+                  {awaitingSessions.length}
+                </Badge>
+              </div>
+              <Link href="/awaiting">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                  View all <ArrowRight className="h-3 w-3" />
+                </Button>
+              </Link>
             </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {awaitingSessions.map((session) => (
-                <div key={`awaiting-${session.sessionId}`}>
-                  <SessionRow session={session} />
+                <div key={`awaiting-${session.sessionId}`} className="space-y-2">
+                  <div className="flex items-center justify-between rounded-lg border border-amber-500/30 p-3 bg-amber-500/5">
+                    <div className="flex items-center gap-3">
+                      <StatusBadge status={session.status} />
+                      <div>
+                        <p className="text-sm font-medium">{session.projectName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          PID {session.pid} &middot; {formatDuration(session.startedAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => openSession(session)}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Resume
+                    </Button>
+                  </div>
                   {session.lastMessage && (
-                    <div className="ml-4 mt-2 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                    <div className="ml-4 rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
                       {session.lastMessage}
                     </div>
                   )}
@@ -146,6 +172,24 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {data.tokenTimeSeries.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Token Usage</CardTitle>
+              <Link href="/tokens">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                  Details <ArrowRight className="h-3 w-3" />
+                </Button>
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <TokenChart data={data.tokenTimeSeries} />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
