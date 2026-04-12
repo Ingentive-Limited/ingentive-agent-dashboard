@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/table";
 import { formatDuration, formatTokens, formatCost, formatRelativeTime } from "@/lib/utils";
 import type { SessionHistory, ConversationMessage } from "@/lib/types";
-import { ChevronDown, ChevronRight, History, AlertCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, History, AlertCircle, Download } from "lucide-react";
+import { exportCSV, exportJSON } from "@/lib/export";
 
 function ConversationPreview({ sessionId }: { sessionId: string }) {
   const { data: messages } = usePolling<ConversationMessage[]>(
@@ -124,9 +125,64 @@ export default function HistoryPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Session History</h1>
-        <span className="text-sm text-muted-foreground">
-          {history.length} sessions
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">
+            {history.length} sessions
+          </span>
+          {history.length > 0 && (
+            <>
+              <div className="h-4 w-px bg-border" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() =>
+                  exportCSV(
+                    history.map((h) => ({
+                      sessionId: h.sessionId,
+                      project: h.projectName,
+                      status: h.status,
+                      startedAt: new Date(h.startedAt).toISOString(),
+                      messages: h.messageCount,
+                      input_tokens: h.totalTokens.input_tokens,
+                      output_tokens: h.totalTokens.output_tokens,
+                      cost: h.cost.totalCost.toFixed(4),
+                      cwd: h.cwd,
+                    })),
+                    "session-history.csv",
+                    [
+                      { key: "sessionId", label: "Session ID" },
+                      { key: "project", label: "Project" },
+                      { key: "status", label: "Status" },
+                      { key: "startedAt", label: "Started" },
+                      { key: "messages", label: "Messages" },
+                      { key: "input_tokens", label: "Input Tokens" },
+                      { key: "output_tokens", label: "Output Tokens" },
+                      { key: "cost", label: "Cost (USD)" },
+                      { key: "cwd", label: "Working Directory" },
+                    ]
+                  )
+                }
+                aria-label="Export session history as CSV"
+                title="Export as CSV"
+              >
+                <Download className="h-3 w-3" aria-hidden="true" />
+                CSV
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() => exportJSON(history, "session-history.json")}
+                aria-label="Export session history as JSON"
+                title="Export as JSON"
+              >
+                <Download className="h-3 w-3" aria-hidden="true" />
+                JSON
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {history.length === 0 ? (

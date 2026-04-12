@@ -23,7 +23,8 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { DollarSign, TrendingUp, TrendingDown } from "lucide-react";
+import { DollarSign, TrendingUp, TrendingDown, Download } from "lucide-react";
+import { exportCSV, exportJSON } from "@/lib/export";
 
 const BAR_SERIES = [
   { dataKey: "input", name: "Input", color: "#3b82f6" },
@@ -200,18 +201,71 @@ export default function TokensPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Token Usage</h1>
-        <div className="flex items-center gap-1">
-          {dateRanges.map((r) => (
-            <Button
-              key={r.value}
-              variant={dateRange === r.value ? "secondary" : "ghost"}
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => setDateRange(r.value)}
-            >
-              {r.label}
-            </Button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {dateRanges.map((r) => (
+              <Button
+                key={r.value}
+                variant={dateRange === r.value ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setDateRange(r.value)}
+              >
+                {r.label}
+              </Button>
+            ))}
+          </div>
+          {dailyData && dailyData.length > 0 && (
+            <>
+              <div className="h-4 w-px bg-border" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() =>
+                  exportCSV(
+                    dailyData.map((d) => ({
+                      date: d.date,
+                      input_tokens: d.input_tokens,
+                      output_tokens: d.output_tokens,
+                      cache_create: d.cache_creation_input_tokens,
+                      cache_read: d.cache_read_input_tokens,
+                      cost: d.totalCost.toFixed(4),
+                      sessions: d.sessionCount,
+                    })),
+                    `token-usage-${dateRange}d.csv`,
+                    [
+                      { key: "date", label: "Date" },
+                      { key: "input_tokens", label: "Input Tokens" },
+                      { key: "output_tokens", label: "Output Tokens" },
+                      { key: "cache_create", label: "Cache Create" },
+                      { key: "cache_read", label: "Cache Read" },
+                      { key: "cost", label: "Cost (USD)" },
+                      { key: "sessions", label: "Sessions" },
+                    ]
+                  )
+                }
+                aria-label="Export token data as CSV"
+                title="Export as CSV"
+              >
+                <Download className="h-3 w-3" aria-hidden="true" />
+                CSV
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() =>
+                  exportJSON(dailyData, `token-usage-${dateRange}d.json`)
+                }
+                aria-label="Export token data as JSON"
+                title="Export as JSON"
+              >
+                <Download className="h-3 w-3" aria-hidden="true" />
+                JSON
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
