@@ -19,6 +19,14 @@ export function formatTokens(n: number): string {
   return n.toString();
 }
 
+export function formatCost(cost: number): string {
+  if (cost >= 1) return `$${cost.toFixed(2)}`;
+  if (cost >= 0.01) return `$${cost.toFixed(3)}`;
+  if (cost >= 0.001) return `$${cost.toFixed(4)}`;
+  if (cost === 0) return "$0.00";
+  return `<$0.001`;
+}
+
 export function formatRelativeTime(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
   const minutes = Math.floor(diff / (1000 * 60));

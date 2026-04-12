@@ -1,16 +1,21 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Terminal, Bell, BarChart3, FolderOpen, Clock } from "lucide-react";
-import { formatTokens } from "@/lib/utils";
+import { Terminal, BarChart3, FolderOpen, Clock, DollarSign } from "lucide-react";
+import { formatTokens, formatCost } from "@/lib/utils";
 import type { DashboardOverview } from "@/lib/types";
 
-export function OverviewCards({ data }: { data: DashboardOverview }) {
+interface OverviewCardsProps {
+  data: DashboardOverview;
+  showCost?: boolean;
+}
+
+export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
   const totalTokens =
     data.totalTokensToday.input_tokens + data.totalTokensToday.output_tokens;
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+    <div className={`grid gap-4 md:grid-cols-2 ${showCost ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
@@ -20,31 +25,6 @@ export function OverviewCards({ data }: { data: DashboardOverview }) {
           <div className="text-2xl font-bold">{data.activeSessions}</div>
           <p className="text-xs text-muted-foreground">
             {data.activeSessions === 1 ? "session" : "sessions"} running
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card className={data.awaitingInput > 0 ? "border-amber-500/50" : ""}>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Awaiting Input</CardTitle>
-          <Bell
-            className={`h-4 w-4 ${
-              data.awaitingInput > 0
-                ? "text-amber-500 animate-pulse"
-                : "text-muted-foreground"
-            }`}
-          />
-        </CardHeader>
-        <CardContent>
-          <div
-            className={`text-2xl font-bold ${
-              data.awaitingInput > 0 ? "text-amber-500" : ""
-            }`}
-          >
-            {data.awaitingInput}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {data.awaitingInput === 1 ? "session needs" : "sessions need"} attention
           </p>
         </CardContent>
       </Card>
@@ -60,11 +40,25 @@ export function OverviewCards({ data }: { data: DashboardOverview }) {
             {formatTokens(data.totalTokensToday.input_tokens)} in /{" "}
             {formatTokens(data.totalTokensToday.output_tokens)} out
           </p>
-          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-            active sessions only
-          </p>
         </CardContent>
       </Card>
+
+      {showCost && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Estimated Cost</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {formatCost(data.totalCost.totalCost)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              active sessions only
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

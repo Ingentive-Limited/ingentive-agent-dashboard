@@ -4,7 +4,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-
+import { SearchDialog } from "@/components/search-dialog";
 
 const roboto = Roboto({
   variable: "--font-roboto",
@@ -38,8 +38,9 @@ export default function RootLayout({
           <SidebarProvider>
             <AppSidebar />
             <SidebarInset>
-              <header className="flex h-10 shrink-0 items-center border-b px-3">
+              <header className="flex h-10 shrink-0 items-center justify-between border-b px-3">
                 <SidebarTrigger className="-ml-1" />
+                <SearchDialog />
               </header>
               <main className="flex-1 p-4">{children}</main>
             </SidebarInset>
