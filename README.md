@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ingentive Agent OS
+
+A local management dashboard for monitoring and interacting with your active Claude Code sessions, projects, token usage, and scheduled tasks.
+
+Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Claude Desktop app storage to give you real-time visibility into everything Claude is doing on your machine.
+
+## Features
+
+- **Dashboard** - Overview of active sessions, awaiting input count, token usage, active projects, and scheduled tasks
+- **Sessions** - Live session list with status indicators (running, processing, idle, awaiting input), PID, duration, and entrypoint (CLI/Desktop)
+- **Awaiting Input** - Sessions where Claude is waiting for your response, with browser notification support
+- **Projects** - All Claude projects with session counts, last activity, and token summaries
+- **Project Detail** - Per-project view with session history, token usage charts, subagents, and memory files
+- **Token Usage** - Stacked charts showing input/output/cache token breakdown per project
+- **Scheduled Tasks** - All scheduled tasks grouped by project, pulled from Claude Desktop
+- **Session Interaction** - Click any session to open it directly in Terminal via `claude -r`
+- **Dark/Light Mode** - Full theme support with the Ingentive brand
+
+## Tech Stack
+
+- Next.js 15 (App Router) + TypeScript
+- shadcn/ui v4 + Tailwind CSS v4
+- Recharts for token usage charts
+- SWR for client-side polling (5s refresh)
+- next-themes for dark/light mode
+
+## Prerequisites
+
+- Node.js 18+
+- npm
+- Claude Code or Claude Desktop installed (data is read from `~/.claude/` and `~/Library/Application Support/Claude/`)
 
 ## Getting Started
 
-First, run the development server:
+### Install dependencies
+
+```bash
+cd ingentive-agent-os
+npm install
+```
+
+### Build and run in production mode
+
+```bash
+npm run build
+npm start
+```
+
+The app will be available at [http://localhost:3000](http://localhost:3000).
+
+### Run in development mode (with hot reload)
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Data Sources
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+All data is read server-side from the local filesystem. No external APIs or databases are required.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Source | Location | Data |
+|--------|----------|------|
+| Sessions | `~/.claude/sessions/*.json` | Active session PIDs, working directories, entrypoints |
+| Conversations | `~/.claude/projects/<encoded-path>/*.jsonl` | Token usage, session status, message history |
+| Subagents | `~/.claude/projects/.../subagents/agent-*.meta.json` | Agent types and descriptions |
+| Scheduled Tasks | `~/Library/Application Support/Claude/local-agent-mode-sessions/**/scheduled-tasks.json` | Task definitions, schedules, last run times |
+| Task Definitions | `~/Documents/Claude/Scheduled/*/SKILL.md` | Task descriptions and prompts |
 
-## Learn More
+## Session Status Detection
 
-To learn more about Next.js, take a look at the following resources:
+Session status is determined by reading the last entry in each session's JSONL conversation log:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Last Entry | Status |
+|-----------|--------|
+| Assistant message with `stop_reason: "end_turn"` | Awaiting input |
+| Assistant message with `AskUserQuestion` tool use | Needs attention |
+| Assistant message with `stop_reason: "tool_use"` | Running |
+| User message | Processing |
+| PID not alive | Dead |
