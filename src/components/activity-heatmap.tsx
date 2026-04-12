@@ -94,7 +94,16 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
       weeks.push(currentWeek);
     }
 
-    return { grid: weeks, maxVal: max, months: monthLabels };
+    // Filter out month labels that are too close together (< 3 weeks apart)
+    const filteredMonths: typeof monthLabels = [];
+    for (const m of monthLabels) {
+      const prev = filteredMonths[filteredMonths.length - 1];
+      if (!prev || m.weekIndex - prev.weekIndex >= 3) {
+        filteredMonths.push(m);
+      }
+    }
+
+    return { grid: weeks, maxVal: max, months: filteredMonths };
   }, [data]);
 
   const cellSize = 14;
@@ -110,6 +119,7 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
         <svg
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           width="100%"
+          preserveAspectRatio="xMidYMid meet"
           className="block"
           role="img"
           aria-label={`Activity heatmap showing token usage over the last ${WEEKS_TO_SHOW} weeks`}
@@ -121,9 +131,9 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
             <text
               key={i}
               x={labelWidth + m.weekIndex * (cellSize + cellGap)}
-              y={10}
+              y={12}
               fontSize={10}
-              fill={isDark ? "#666" : "#999"}
+              fill={isDark ? "#888" : "#777"}
             >
               {m.label}
             </text>
@@ -136,7 +146,7 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
               x={0}
               y={headerHeight + i * (cellSize + cellGap) + cellSize - 2}
               fontSize={10}
-              fill={isDark ? "#666" : "#999"}
+              fill={isDark ? "#888" : "#777"}
             >
               {label}
             </text>
