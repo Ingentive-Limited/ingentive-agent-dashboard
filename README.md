@@ -26,6 +26,8 @@ Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Clau
 - Recharts for token usage charts
 - SWR for client-side polling (5s refresh)
 - next-themes for dark/light mode
+- Vitest + Testing Library for unit tests
+- Playwright for end-to-end tests
 
 ## Prerequisites
 
@@ -66,6 +68,49 @@ The app will be available at [http://localhost:3000](http://localhost:3000).
 ```bash
 npm run dev
 ```
+
+## Testing
+
+### Unit Tests
+
+Unit tests use [Vitest](https://vitest.dev/) with [Testing Library](https://testing-library.com/) and jsdom. Tests cover utility functions, hooks, middleware security, CSV export, and component rendering.
+
+```bash
+# Run unit tests once
+npm run test:unit
+
+# Run in watch mode during development
+npm run test:unit:watch
+```
+
+### End-to-End Tests
+
+E2E tests use [Playwright](https://playwright.dev/) against a production build. They cover page navigation, dashboard rendering, accessibility landmarks, and theme toggling.
+
+```bash
+# Install Playwright browsers (first time only)
+npx playwright install --with-deps chromium
+
+# Run e2e tests (auto-builds and starts the app)
+npm run test:e2e
+
+# Run with interactive UI
+npm run test:e2e:ui
+```
+
+### Run All Tests
+
+```bash
+npm test
+```
+
+### CI
+
+A GitHub Actions workflow (`.github/workflows/test.yml`) runs on every pull request and push to main:
+
+- **Unit Tests** — `npm run test:unit`
+- **E2E Tests** — Playwright with Chromium, uploads HTML report as artifact
+- **Lint & Type Check** — ESLint + `tsc --noEmit`
 
 ## Data Sources
 

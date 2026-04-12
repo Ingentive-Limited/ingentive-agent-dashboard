@@ -116,10 +116,48 @@ export interface SearchResult {
   snippet?: string;
 }
 
+export interface DailyTokenUsage {
+  date: string; // YYYY-MM-DD
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  totalCost: number;
+  sessionCount: number;
+}
+
+export interface ProjectStats {
+  id: string;
+  name: string;
+  totalTokens: TokenUsage;
+  cost: CostEstimate;
+  sessionCount: number;
+  lastActivity: string;
+  errorCount: number;
+  successCount: number;
+  errorRate: number;
+}
+
+export interface InstalledPlugin {
+  name: string;
+  marketplace: string;
+  scope: "user" | "project";
+  version: string;
+  installedAt: string;
+  lastUpdated: string;
+}
+
+export interface SystemStatus {
+  cliVersion: string;
+  activeSessions: number;
+  apiStatus: "operational" | "degraded" | "unknown";
+}
+
 export interface DashboardOverview {
   activeSessions: number;
   awaitingInput: number;
   totalTokensToday: TokenUsage;
+  totalTokensMonth: TokenUsage;
   totalCost: CostEstimate;
   activeProjects: number;
   scheduledTasks: number;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 
 export type BillingMode = "api" | "subscription";
 
@@ -18,11 +18,7 @@ function load(): BillingMode {
 }
 
 export function useBillingMode() {
-  const [mode, setMode] = useState<BillingMode>("api");
-
-  useEffect(() => {
-    setMode(load());
-  }, []);
+  const [mode, setMode] = useState<BillingMode>(load);
 
   const toggle = useCallback(() => {
     setMode((prev) => {

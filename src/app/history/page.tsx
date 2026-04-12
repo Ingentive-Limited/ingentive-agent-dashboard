@@ -5,7 +5,6 @@ import { usePolling } from "@/hooks/use-polling";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +17,9 @@ import {
 } from "@/components/ui/table";
 import { formatDuration, formatTokens, formatCost, formatRelativeTime } from "@/lib/utils";
 import type { SessionHistory, ConversationMessage } from "@/lib/types";
-import { ChevronDown, ChevronRight, History, AlertCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, History, AlertCircle, Download } from "lucide-react";
+import { exportCSV, exportJSON } from "@/lib/export";
+import { EmptyState } from "@/components/empty-state";
 
 function ConversationPreview({ sessionId }: { sessionId: string }) {
   const { data: messages } = usePolling<ConversationMessage[]>(
@@ -124,18 +125,73 @@ export default function HistoryPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Session History</h1>
-        <span className="text-sm text-muted-foreground">
-          {history.length} sessions
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">
+            {history.length} sessions
+          </span>
+          {history.length > 0 && (
+            <>
+              <div className="h-4 w-px bg-border" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() =>
+                  exportCSV(
+                    history.map((h) => ({
+                      sessionId: h.sessionId,
+                      project: h.projectName,
+                      status: h.status,
+                      startedAt: new Date(h.startedAt).toISOString(),
+                      messages: h.messageCount,
+                      input_tokens: h.totalTokens.input_tokens,
+                      output_tokens: h.totalTokens.output_tokens,
+                      cost: h.cost.totalCost.toFixed(4),
+                      cwd: h.cwd,
+                    })),
+                    "session-history.csv",
+                    [
+                      { key: "sessionId", label: "Session ID" },
+                      { key: "project", label: "Project" },
+                      { key: "status", label: "Status" },
+                      { key: "startedAt", label: "Started" },
+                      { key: "messages", label: "Messages" },
+                      { key: "input_tokens", label: "Input Tokens" },
+                      { key: "output_tokens", label: "Output Tokens" },
+                      { key: "cost", label: "Cost (USD)" },
+                      { key: "cwd", label: "Working Directory" },
+                    ]
+                  )
+                }
+                aria-label="Export session history as CSV"
+                title="Export as CSV"
+              >
+                <Download className="h-3 w-3" aria-hidden="true" />
+                CSV
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() => exportJSON(history, "session-history.json")}
+                aria-label="Export session history as JSON"
+                title="Export as JSON"
+              >
+                <Download className="h-3 w-3" aria-hidden="true" />
+                JSON
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {history.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <History className="h-12 w-12 text-muted-foreground/30 mb-4" aria-hidden="true" />
-            <p className="text-muted-foreground">No session history found</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={History}
+          title="No session history found"
+          description="Session history will appear here after you start using Claude. Each conversation is tracked with token usage and duration."
+          command="claude"
+        />
       ) : (
         <div className="rounded-lg border">
           <Table aria-label="Session history">
@@ -155,31 +211,21 @@ export default function HistoryPage() {
               {history.map((session) => (
                 <Fragment key={session.sessionId}>
                   <TableRow
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => toggleExpand(session.sessionId)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        toggleExpand(session.sessionId);
-                      }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                    aria-expanded={expanded.has(session.sessionId)}
-                    aria-label={`${session.projectName} session — ${session.status}. Click to ${expanded.has(session.sessionId) ? "collapse" : "expand"} details.`}
+                    className="hover:bg-muted/50"
                   >
                     <TableCell>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        aria-hidden="true"
-                        tabIndex={-1}
+                        onClick={() => toggleExpand(session.sessionId)}
+                        aria-expanded={expanded.has(session.sessionId)}
+                        aria-label={`${expanded.has(session.sessionId) ? "Collapse" : "Expand"} ${session.projectName} session details`}
                       >
                         {expanded.has(session.sessionId) ? (
-                          <ChevronDown className="h-4 w-4" />
+                          <ChevronDown className="h-4 w-4" aria-hidden="true" />
                         ) : (
-                          <ChevronRight className="h-4 w-4" />
+                          <ChevronRight className="h-4 w-4" aria-hidden="true" />
                         )}
                       </Button>
                     </TableCell>

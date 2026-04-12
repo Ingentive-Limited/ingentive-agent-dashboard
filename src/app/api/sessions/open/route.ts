@@ -49,7 +49,8 @@ function openSessionInTerminal(cwd: string, sessionId: string) {
   } else {
     // macOS: use `open -a Terminal <cwd>` to open Terminal at the directory,
     // then use osascript to run the claude command in the frontmost Terminal window.
-    // The sessionId is validated by regex, so it's safe to interpolate.
+    // The sessionId is validated by regex AND escaped for AppleScript (defense in depth).
+    const escapedId = sessionId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const proc = spawn("open", ["-a", "Terminal", cwd], {
       detached: true,
       stdio: "ignore",
@@ -59,7 +60,7 @@ function openSessionInTerminal(cwd: string, sessionId: string) {
       setTimeout(() => {
         spawn("osascript", [
           "-e",
-          `tell application "Terminal" to do script "claude -r ${sessionId}" in front window`,
+          `tell application "Terminal" to do script "claude -r ${escapedId}" in front window`,
         ], {
           detached: true,
           stdio: "ignore",

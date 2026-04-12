@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import readline from "readline";
+import { execFileSync } from "child_process";
 import type {
   ClaudeSession,
   SessionStatus,
@@ -17,6 +18,10 @@ import type {
   SessionHistory,
   ConversationMessage,
   SearchResult,
+  DailyTokenUsage,
+  ProjectStats,
+  InstalledPlugin,
+  SystemStatus,
 } from "./types";
 
 // Anthropic pricing per million tokens (Sonnet 4 as default)
@@ -288,11 +293,30 @@ function getSessionStatus(lastEntry: Record<string, unknown>): {
 function isWithinDir(filePath: string, baseDir: string): boolean {
   const resolved = path.resolve(filePath);
   const resolvedBase = path.resolve(baseDir) + path.sep;
-  return resolved.startsWith(resolvedBase) || resolved === path.resolve(baseDir);
+  if (!(resolved.startsWith(resolvedBase) || resolved === path.resolve(baseDir))) {
+    return false;
+  }
+  // Also resolve symlinks and check real path to prevent symlink-based escapes
+  try {
+    const realPath = fs.realpathSync(resolved);
+    const realBase = fs.realpathSync(baseDir) + path.sep;
+    return realPath.startsWith(realBase) || realPath === fs.realpathSync(baseDir);
+  } catch {
+    // If realpath fails (e.g., file doesn't exist yet), fall back to resolved check
+    return true;
+  }
+}
+
+/**
+ * Read the last N lines of a JSONL conversation file.
+ * Exported for use by the conversation API route to avoid full-file streaming.
+ */
+export async function readConversationLines(filePath: string, n: number): Promise<string[]> {
+  return readLastLines(filePath, n);
 }
 
 // Get the session's JSONL file path by matching sessionId to project files
-function findSessionJsonl(sessionId: string): string | null {
+export function findSessionJsonl(sessionId: string): string | null {
   // Defense-in-depth: validate sessionId format even though callers should too
   if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null;
 
@@ -643,7 +667,7 @@ export async function getScheduledTasks(): Promise<ScheduledTask[]> {
               }
               // Try to read SKILL.md for a better description
               let description = id.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-              if (t.filePath && fs.existsSync(t.filePath)) {
+              if (t.filePath && isWithinDir(t.filePath, CLAUDE_DIR) && fs.existsSync(t.filePath)) {
                 try {
                   const skillContent = await fs.promises.readFile(t.filePath, "utf-8");
                   const descMatch = skillContent.match(/description:\s*(.+)/);
@@ -862,10 +886,29 @@ export async function getOverview(): Promise<DashboardOverview> {
     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
+  // Compute monthly tokens from the time series
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const monthStartMs = monthStart.getTime();
+
+  let monthlyTokens = emptyTokenUsage();
+  for (const point of tokenTimeSeries) {
+    if (new Date(point.timestamp).getTime() >= monthStartMs) {
+      monthlyTokens = addTokens(monthlyTokens, {
+        input_tokens: point.input_tokens,
+        output_tokens: point.output_tokens,
+        cache_creation_input_tokens: point.cache_creation_input_tokens,
+        cache_read_input_tokens: point.cache_read_input_tokens,
+      });
+    }
+  }
+
   return {
     activeSessions: aliveSessions.length,
     awaitingInput: awaitingInput.length,
     totalTokensToday: todayTokens,
+    totalTokensMonth: monthlyTokens,
     totalCost: calculateCost(todayTokens),
     activeProjects: projects.filter((p) => {
       return (
@@ -1157,4 +1200,258 @@ export async function getSessionErrors(sessionId: string): Promise<string[]> {
   } catch { /* skip */ }
 
   return errors.slice(-20);
+}
+
+// --- Daily Token Usage Aggregation ---
+
+export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenUsage[]> {
+  const projectsDir = path.join(CLAUDE_DIR, "projects");
+  if (!fs.existsSync(projectsDir)) return [];
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  cutoff.setHours(0, 0, 0, 0);
+  const cutoffMs = cutoff.getTime();
+
+  const dailyMap = new Map<string, { tokens: TokenUsage; sessions: Set<string> }>();
+
+  const allDirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
+  const dirs = allDirs.filter((d) => d.isDirectory());
+
+  for (const dir of dirs) {
+    const projPath = path.join(projectsDir, dir.name);
+    let files: string[];
+    try {
+      files = (await fs.promises.readdir(projPath)).filter((f) => f.endsWith(".jsonl"));
+    } catch { continue; }
+
+    // Only read files modified within the window
+    for (const file of files) {
+      const filePath = path.join(projPath, file);
+      try {
+        const stat = await fs.promises.stat(filePath);
+        if (stat.mtimeMs < cutoffMs) continue;
+
+        const sessionId = file.replace(".jsonl", "");
+        const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
+        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+        for await (const line of rl) {
+          if (!line.trim()) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type !== "assistant" || !entry.message?.usage || !entry.timestamp) continue;
+
+            const ts = new Date(entry.timestamp);
+            if (ts.getTime() < cutoffMs) continue;
+
+            // Use local date to match the fill loop which uses local midnight
+            const dateKey = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, "0")}-${String(ts.getDate()).padStart(2, "0")}`;
+            const u = entry.message.usage;
+
+            if (!dailyMap.has(dateKey)) {
+              dailyMap.set(dateKey, { tokens: emptyTokenUsage(), sessions: new Set() });
+            }
+            const day = dailyMap.get(dateKey)!;
+            day.tokens = addTokens(day.tokens, {
+              input_tokens: u.input_tokens || 0,
+              output_tokens: u.output_tokens || 0,
+              cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+              cache_read_input_tokens: u.cache_read_input_tokens || 0,
+            });
+            day.sessions.add(sessionId);
+          } catch { /* skip */ }
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Fill in missing days with zeros (using local dates to match dateKey format)
+  const result: DailyTokenUsage[] = [];
+  const now = new Date();
+  for (let d = new Date(cutoff); d <= now; d.setDate(d.getDate() + 1)) {
+    const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const day = dailyMap.get(dateKey);
+    if (day) {
+      const cost = calculateCost(day.tokens);
+      result.push({
+        date: dateKey,
+        ...day.tokens,
+        totalCost: cost.totalCost,
+        sessionCount: day.sessions.size,
+      });
+    } else {
+      result.push({
+        date: dateKey,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        totalCost: 0,
+        sessionCount: 0,
+      });
+    }
+  }
+
+  return result;
+}
+
+// --- Project Stats with Error Rates ---
+
+export async function getProjectStats(): Promise<ProjectStats[]> {
+  const projectsDir = path.join(CLAUDE_DIR, "projects");
+  if (!fs.existsSync(projectsDir)) return [];
+
+  const pathCache = await buildProjectPathCache();
+  const allDirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
+  const dirs = allDirs.filter((d) => d.isDirectory());
+  const stats: ProjectStats[] = [];
+
+  for (const dir of dirs) {
+    const projPath = path.join(projectsDir, dir.name);
+    let files: string[];
+    try {
+      files = (await fs.promises.readdir(projPath)).filter((f) => f.endsWith(".jsonl"));
+    } catch { continue; }
+
+    let totalTokens = emptyTokenUsage();
+    let lastActivity = "";
+    let errorCount = 0;
+    let successCount = 0;
+
+    for (const file of files) {
+      const filePath = path.join(projPath, file);
+      try {
+        const stat = await fs.promises.stat(filePath);
+        const iso = stat.mtime.toISOString();
+        if (!lastActivity || iso > lastActivity) lastActivity = iso;
+
+        // Read last 20 lines to check outcome and tally tokens
+        const lines = await readLastLines(filePath, 50);
+        let sessionHasError = false;
+
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type === "assistant" && entry.message?.usage) {
+              const u = entry.message.usage;
+              totalTokens = addTokens(totalTokens, {
+                input_tokens: u.input_tokens || 0,
+                output_tokens: u.output_tokens || 0,
+                cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+                cache_read_input_tokens: u.cache_read_input_tokens || 0,
+              });
+            }
+            // Check for error indicators
+            if (entry.type === "assistant" && entry.message?.content) {
+              for (const block of entry.message.content) {
+                if (block.type === "tool_result" && block.is_error) {
+                  sessionHasError = true;
+                }
+              }
+            }
+            if (entry.type === "result" && entry.is_error) {
+              sessionHasError = true;
+            }
+          } catch { /* skip */ }
+        }
+
+        if (sessionHasError) {
+          errorCount++;
+        } else {
+          successCount++;
+        }
+      } catch { /* skip */ }
+    }
+
+    const realPath = pathCache.get(dir.name) || decodeProjectPath(dir.name);
+    const total = errorCount + successCount;
+
+    stats.push({
+      id: dir.name,
+      name: projectNameFromPath(realPath),
+      totalTokens,
+      cost: calculateCost(totalTokens),
+      sessionCount: files.length,
+      lastActivity,
+      errorCount,
+      successCount,
+      errorRate: total > 0 ? errorCount / total : 0,
+    });
+  }
+
+  return stats.sort(
+    (a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+  );
+}
+
+/**
+ * Read installed plugins from ~/.claude/plugins/installed_plugins.json
+ */
+export async function getInstalledPlugins(): Promise<InstalledPlugin[]> {
+  const pluginsFile = path.join(CLAUDE_DIR, "plugins", "installed_plugins.json");
+  if (!fs.existsSync(pluginsFile)) return [];
+
+  try {
+    const raw = await fs.promises.readFile(pluginsFile, "utf-8");
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== "object" || !data.plugins) return [];
+
+    const plugins: InstalledPlugin[] = [];
+    for (const [key, entries] of Object.entries(data.plugins)) {
+      if (!Array.isArray(entries) || entries.length === 0) continue;
+      const entry = entries[0] as Record<string, unknown>;
+      const [pluginName, marketplace] = key.split("@");
+      plugins.push({
+        name: pluginName || key,
+        marketplace: marketplace || "unknown",
+        scope: entry.scope === "project" ? "project" : "user",
+        version: typeof entry.version === "string" ? entry.version : "unknown",
+        installedAt: typeof entry.installedAt === "string" ? entry.installedAt : "",
+        lastUpdated: typeof entry.lastUpdated === "string" ? entry.lastUpdated : "",
+      });
+    }
+
+    return plugins.sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get system status: CLI version, active session count, API reachability.
+ */
+export async function getSystemStatus(): Promise<SystemStatus> {
+  let cliVersion = "unknown";
+  try {
+    cliVersion = execFileSync("claude", ["--version"], {
+      timeout: 3000,
+      encoding: "utf-8",
+    }).trim();
+  } catch {
+    // CLI not installed or not in PATH
+  }
+
+  const sessions = await getActiveSessions();
+  const activeSessions = sessions.filter((s) => s.isAlive).length;
+
+  // Quick check of Anthropic API status page
+  let apiStatus: "operational" | "degraded" | "unknown" = "unknown";
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch("https://status.anthropic.com/api/v2/status.json", {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const json = await res.json();
+      const indicator = json?.status?.indicator;
+      apiStatus = indicator === "none" ? "operational" : "degraded";
+    }
+  } catch {
+    // Network error or timeout
+  }
+
+  return { cliVersion, activeSessions, apiStatus };
 }
