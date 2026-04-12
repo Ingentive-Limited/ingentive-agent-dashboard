@@ -10,6 +10,7 @@ export interface ClaudeSession {
   projectName: string;
   lastMessage?: string;
   slug?: string;
+  totalTokens?: TokenUsage;
 }
 
 export type SessionStatus =
@@ -37,6 +38,14 @@ export interface TokenDataPoint {
   cumulative_output: number;
 }
 
+export interface CostEstimate {
+  inputCost: number;
+  outputCost: number;
+  cacheWriteCost: number;
+  cacheReadCost: number;
+  totalCost: number;
+}
+
 export interface ProjectSummary {
   id: string;
   path: string;
@@ -44,6 +53,7 @@ export interface ProjectSummary {
   sessionCount: number;
   lastActivity: string;
   totalTokens: TokenUsage;
+  cost: CostEstimate;
 }
 
 export interface ProjectDetail extends ProjectSummary {
@@ -77,11 +87,42 @@ export interface ScheduledTask {
   nextRunAt?: string;
 }
 
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  text: string;
+  timestamp: string;
+  toolUses?: string[];
+  errors?: string[];
+}
+
+export interface SessionHistory {
+  sessionId: string;
+  projectName: string;
+  cwd: string;
+  startedAt: number;
+  endedAt?: string;
+  entrypoint: string;
+  totalTokens: TokenUsage;
+  cost: CostEstimate;
+  messageCount: number;
+  status: SessionStatus;
+}
+
+export interface SearchResult {
+  type: "session" | "project" | "conversation";
+  title: string;
+  subtitle: string;
+  href: string;
+  snippet?: string;
+}
+
 export interface DashboardOverview {
   activeSessions: number;
   awaitingInput: number;
   totalTokensToday: TokenUsage;
+  totalCost: CostEstimate;
   activeProjects: number;
   scheduledTasks: number;
   recentSessions: ClaudeSession[];
+  tokenTimeSeries: TokenDataPoint[];
 }

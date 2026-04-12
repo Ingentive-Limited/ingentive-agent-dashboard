@@ -1,8 +1,8 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Terminal, Bell, BarChart3, FolderOpen, Clock } from "lucide-react";
-import { formatTokens } from "@/lib/utils";
+import { Terminal, Bell, BarChart3, FolderOpen, Clock, DollarSign } from "lucide-react";
+import { formatTokens, formatCost } from "@/lib/utils";
 import type { DashboardOverview } from "@/lib/types";
 
 export function OverviewCards({ data }: { data: DashboardOverview }) {
@@ -10,7 +10,7 @@ export function OverviewCards({ data }: { data: DashboardOverview }) {
     data.totalTokensToday.input_tokens + data.totalTokensToday.output_tokens;
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
@@ -60,7 +60,19 @@ export function OverviewCards({ data }: { data: DashboardOverview }) {
             {formatTokens(data.totalTokensToday.input_tokens)} in /{" "}
             {formatTokens(data.totalTokensToday.output_tokens)} out
           </p>
-          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Estimated Cost</CardTitle>
+          <DollarSign className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">
+            {formatCost(data.totalCost.totalCost)}
+          </div>
+          <p className="text-xs text-muted-foreground">
             active sessions only
           </p>
         </CardContent>
