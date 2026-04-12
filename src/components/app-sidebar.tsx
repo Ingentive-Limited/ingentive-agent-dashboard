@@ -9,6 +9,7 @@ import {
   FolderOpen,
   BarChart3,
   Clock,
+  History,
 } from "lucide-react";
 import {
   Sidebar,
@@ -33,6 +34,7 @@ const monitorLinks = [
 
 const analyticsLinks = [
   { href: "/tokens", label: "Token Usage", icon: BarChart3 },
+  { href: "/history", label: "Session History", icon: History },
 ];
 
 const automationLinks = [
