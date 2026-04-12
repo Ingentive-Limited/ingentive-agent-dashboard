@@ -6,13 +6,16 @@ Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Clau
 
 ## Features
 
-- **Dashboard** - Overview of active sessions, awaiting input count, token usage, active projects, and scheduled tasks
+- **Dashboard** - Overview of active sessions, token usage, estimated costs, active projects, scheduled tasks, and a token usage chart
 - **Sessions** - Live session list with status indicators (running, processing, idle, awaiting input), PID, duration, and entrypoint (CLI/Desktop)
-- **Awaiting Input** - Sessions where Claude is waiting for your response, with browser notification support
-- **Projects** - All Claude projects with session counts, last activity, and token summaries
+- **Awaiting Input** - Sessions where Claude is waiting for your response, with configurable browser notifications (sound, status filters)
+- **Session History** - Full history of all sessions (active and dead) with expandable conversation preview and error surfacing
+- **Projects** - All Claude projects with session counts, last activity, token summaries, and cost estimates. Sort by name, activity, tokens, cost, or sessions. Group by parent directory
 - **Project Detail** - Per-project view with session history, token usage charts, subagents, and memory files
 - **Token Usage** - Stacked charts showing input/output/cache token breakdown per project
 - **Scheduled Tasks** - All scheduled tasks grouped by project, pulled from Claude Desktop
+- **Global Search** - Search across projects, sessions, and conversations with Cmd/Ctrl+K
+- **Cost Tracking** - Estimated USD costs based on Anthropic API pricing (Sonnet 4), with an API/Subscription toggle to hide costs for subscription users
 - **Session Interaction** - Click any session to open it directly in your terminal via `claude -r`
 - **Dark/Light Mode** - Full theme support with the Ingentive brand
 
@@ -87,3 +90,7 @@ Session status is determined by reading the last entry in each session's JSONL c
 | Assistant message with `stop_reason: "tool_use"` | Running |
 | User message | Processing |
 | PID not alive | Dead |
+
+## License
+
+This project is licensed under an MIT License with Restrictions — free to use, no redistribution without permission, forking with attribution allowed. See [LICENSE](LICENSE) for details.
