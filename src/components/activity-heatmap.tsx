@@ -97,19 +97,20 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
     return { grid: weeks, maxVal: max, months: monthLabels };
   }, [data]);
 
-  const cellSize = 12;
-  const cellGap = 2;
-  const labelWidth = 28;
-  const headerHeight = 16;
+  const cellSize = 14;
+  const cellGap = 3;
+  const labelWidth = 32;
+  const headerHeight = 18;
   const svgWidth = labelWidth + grid.length * (cellSize + cellGap) + 20;
   const svgHeight = headerHeight + 7 * (cellSize + cellGap) + 10;
 
   return (
     <div className="space-y-2">
-      <div className="overflow-x-auto relative">
+      <div className="relative">
         <svg
-          width={svgWidth}
-          height={svgHeight}
+          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          width="100%"
+          className="block"
           role="img"
           aria-label={`Activity heatmap showing token usage over the last ${WEEKS_TO_SHOW} weeks`}
           onMouseLeave={() => setHover(null)}
@@ -121,7 +122,7 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
               key={i}
               x={labelWidth + m.weekIndex * (cellSize + cellGap)}
               y={10}
-              fontSize={9}
+              fontSize={10}
               fill={isDark ? "#666" : "#999"}
             >
               {m.label}
@@ -134,7 +135,7 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
               key={i}
               x={0}
               y={headerHeight + i * (cellSize + cellGap) + cellSize - 2}
-              fontSize={9}
+              fontSize={10}
               fill={isDark ? "#666" : "#999"}
             >
               {label}
@@ -194,14 +195,14 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
           )}
         </svg>
 
-        {/* Custom tooltip */}
+        {/* Custom tooltip — positioned as percentage of SVG viewBox */}
         {hover && (
           <div
             className="absolute pointer-events-none z-10 rounded-md px-2.5 py-1.5 text-xs shadow-md"
             style={{
-              left: hover.x,
-              top: hover.y - 36,
-              transform: "translateX(-50%)",
+              left: `${(hover.x / svgWidth) * 100}%`,
+              top: `${(hover.y / svgHeight) * 100}%`,
+              transform: "translate(-50%, -120%)",
               backgroundColor: isDark ? "#1a1a1a" : "#fff",
               border: `1px solid ${isDark ? "#333" : "#e5e7eb"}`,
               color: isDark ? "#e5e5e5" : "#1f2937",
