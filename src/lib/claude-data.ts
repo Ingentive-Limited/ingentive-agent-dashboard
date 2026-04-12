@@ -1242,7 +1242,8 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
             const ts = new Date(entry.timestamp);
             if (ts.getTime() < cutoffMs) continue;
 
-            const dateKey = ts.toISOString().slice(0, 10);
+            // Use local date to match the fill loop which uses local midnight
+            const dateKey = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, "0")}-${String(ts.getDate()).padStart(2, "0")}`;
             const u = entry.message.usage;
 
             if (!dailyMap.has(dateKey)) {
@@ -1262,11 +1263,11 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
     }
   }
 
-  // Fill in missing days with zeros
+  // Fill in missing days with zeros (using local dates to match dateKey format)
   const result: DailyTokenUsage[] = [];
   const now = new Date();
   for (let d = new Date(cutoff); d <= now; d.setDate(d.getDate() + 1)) {
-    const dateKey = d.toISOString().slice(0, 10);
+    const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const day = dailyMap.get(dateKey);
     if (day) {
       const cost = calculateCost(day.tokens);
