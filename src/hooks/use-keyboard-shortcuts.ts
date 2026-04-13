@@ -37,7 +37,7 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // ⌘/Ctrl + 1-7: Navigate to pages
+      // ⌘/Ctrl + 1-8: Navigate to pages
       if (meta && e.key >= "1" && e.key <= "8") {
         const index = parseInt(e.key, 10) - 1;
         if (index < NAV_ROUTES.length) {
