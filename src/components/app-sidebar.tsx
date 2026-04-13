@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -27,31 +28,40 @@ import {
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SystemStatusBar } from "@/components/system-status-bar";
+
+/** Detect modifier key: ⌘ on Mac, Ctrl on Windows/Linux. */
+function detectModifier(): string {
+  if (typeof navigator === "undefined") return "⌘";
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) ? "⌘" : "Ctrl+";
+}
+
 const monitorLinks = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, shortcut: "⌘1" },
-  { href: "/sessions", label: "Sessions", icon: Terminal, shortcut: "⌘2" },
-  { href: "/awaiting", label: "Awaiting Input", icon: Bell, shortcut: "⌘3" },
-  { href: "/projects", label: "Projects", icon: FolderOpen, shortcut: "⌘4" },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard, shortcutKey: "1" },
+  { href: "/sessions", label: "Sessions", icon: Terminal, shortcutKey: "2" },
+  { href: "/awaiting", label: "Awaiting Input", icon: Bell, shortcutKey: "3" },
+  { href: "/projects", label: "Projects", icon: FolderOpen, shortcutKey: "4" },
 ];
 
 const analyticsLinks = [
-  { href: "/tokens", label: "Token Usage", icon: BarChart3, shortcut: "⌘5" },
-  { href: "/history", label: "Session History", icon: History, shortcut: "⌘6" },
+  { href: "/tokens", label: "Token Usage", icon: BarChart3, shortcutKey: "5" },
+  { href: "/history", label: "Session History", icon: History, shortcutKey: "6" },
 ];
 
 const automationLinks = [
-  { href: "/tasks", label: "Scheduled Tasks", icon: Clock, shortcut: "⌘7" },
-  { href: "/plugins", label: "Plugins", icon: Puzzle, shortcut: "⌘8" },
+  { href: "/tasks", label: "Scheduled Tasks", icon: Clock, shortcutKey: "7" },
+  { href: "/plugins", label: "Plugins", icon: Puzzle, shortcutKey: "8" },
 ];
 
 function NavGroup({
   label,
   links,
   isActive,
+  modifier,
 }: {
   label: string;
-  links: Array<{ href: string; label: string; icon: React.ComponentType<{ className?: string }>; shortcut?: string }>;
+  links: Array<{ href: string; label: string; icon: React.ComponentType<{ className?: string }>; shortcutKey?: string }>;
   isActive: (href: string) => boolean;
+  modifier: string;
 }) {
   return (
     <SidebarGroup>
@@ -66,9 +76,9 @@ function NavGroup({
               >
                 <link.icon className="h-4 w-4" aria-hidden="true" />
                 <span className="flex-1">{link.label}</span>
-                {"shortcut" in link && (
+                {link.shortcutKey && (
                   <kbd className="ml-auto text-[10px] text-muted-foreground/60 font-mono" aria-hidden="true">
-                    {link.shortcut}
+                    {modifier}{link.shortcutKey}
                   </kbd>
                 )}
               </SidebarMenuButton>
@@ -82,6 +92,7 @@ function NavGroup({
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const [modifier] = useState(detectModifier);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -95,9 +106,9 @@ export function AppSidebar() {
         <p className="text-[10px] text-muted-foreground leading-none">Agent OS</p>
       </SidebarHeader>
       <SidebarContent>
-        <NavGroup label="Monitor" links={monitorLinks} isActive={isActive} />
-        <NavGroup label="Analytics" links={analyticsLinks} isActive={isActive} />
-        <NavGroup label="Automation" links={automationLinks} isActive={isActive} />
+        <NavGroup label="Monitor" links={monitorLinks} isActive={isActive} modifier={modifier} />
+        <NavGroup label="Analytics" links={analyticsLinks} isActive={isActive} modifier={modifier} />
+        <NavGroup label="Automation" links={automationLinks} isActive={isActive} modifier={modifier} />
       </SidebarContent>
       <SidebarFooter className="px-3 py-2 space-y-3">
         <div className="flex items-center justify-between">

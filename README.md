@@ -2,6 +2,8 @@
 
 A local management dashboard for monitoring and interacting with your active Claude Code sessions, projects, token usage, and scheduled tasks. Works on macOS, Windows, and Linux.
 
+![Ingentive Agent OS Dashboard](preview.png)
+
 Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Claude Desktop app storage to give you real-time visibility into everything Claude is doing on your machine.
 
 ## Features
