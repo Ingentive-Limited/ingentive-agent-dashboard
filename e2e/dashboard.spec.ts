@@ -51,9 +51,9 @@ test.describe("Navigation", () => {
       await page.waitForTimeout(500);
     }
     await expect(dashboardLink).toBeVisible({ timeout: 10000 });
-    await expect(page.getByRole("link", { name: /sessions/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /projects/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /token usage/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sessions", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Projects", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Token Usage", exact: true })).toBeVisible();
   });
 
   test("navigates to sessions page", async ({ page }) => {
