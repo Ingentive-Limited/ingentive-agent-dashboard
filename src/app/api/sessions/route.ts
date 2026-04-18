@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { getActiveSessions } from "@/lib/claude-data";
+import { getActiveSessions, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const sessions = await getActiveSessions();
+    const { searchParams } = new URL(request.url);
+    const provider = parseProvider(searchParams.get("provider"));
+    const sessions = await getActiveSessions(provider);
     return NextResponse.json(sessions);
   } catch {
     return NextResponse.json(

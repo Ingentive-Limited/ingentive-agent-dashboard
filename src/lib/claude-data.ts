@@ -22,7 +22,18 @@ import type {
   ProjectStats,
   InstalledPlugin,
   SystemStatus,
+  ProviderStatus,
 } from "./types";
+import {
+  emptyTokenUsage,
+  addTokens,
+  isPidAlive,
+  isWithinDir,
+  readLastLines,
+  cronToHuman,
+  projectNameFromPath,
+  calculateCost,
+} from "./utils-server";
 
 // Anthropic pricing per million tokens (Sonnet 4 as default)
 const PRICING = {
@@ -32,18 +43,8 @@ const PRICING = {
   cacheRead: 0.30 / 1_000_000,
 };
 
-function calculateCost(tokens: TokenUsage): CostEstimate {
-  const inputCost = tokens.input_tokens * PRICING.input;
-  const outputCost = tokens.output_tokens * PRICING.output;
-  const cacheWriteCost = tokens.cache_creation_input_tokens * PRICING.cacheWrite;
-  const cacheReadCost = tokens.cache_read_input_tokens * PRICING.cacheRead;
-  return {
-    inputCost,
-    outputCost,
-    cacheWriteCost,
-    cacheReadCost,
-    totalCost: inputCost + outputCost + cacheWriteCost + cacheReadCost,
-  };
+function calculateClaudeCost(tokens: TokenUsage): CostEstimate {
+  return calculateCost(tokens, PRICING);
 }
 
 const IS_WIN = process.platform === "win32";
@@ -66,34 +67,6 @@ function getClaudeAppDataDir(): string {
   return path.join(os.homedir(), "Library", "Application Support", "Claude");
 }
 
-function emptyTokenUsage(): TokenUsage {
-  return {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens: 0,
-  };
-}
-
-function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    input_tokens: a.input_tokens + b.input_tokens,
-    output_tokens: a.output_tokens + b.output_tokens,
-    cache_creation_input_tokens:
-      a.cache_creation_input_tokens + b.cache_creation_input_tokens,
-    cache_read_input_tokens:
-      a.cache_read_input_tokens + b.cache_read_input_tokens,
-  };
-}
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // Build a mapping of encoded project dir names to real paths from session cwds
 let projectPathCache: Map<string, string> | null = null;
@@ -169,66 +142,6 @@ function decodeProjectPath(dirName: string): string {
   return dirName.replace(/^-/, "/").replace(/-/g, "/");
 }
 
-function projectNameFromPath(p: string): string {
-  // Split on both / and \ for cross-platform support
-  const parts = p.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || p;
-}
-
-// Read the last N lines of a file by reading chunks from the end.
-// Avoids loading the entire file into memory for large JSONL files.
-const READ_CHUNK_SIZE = 8192;
-
-async function readLastLines(
-  filePath: string,
-  n: number
-): Promise<string[]> {
-  const stat = await fs.promises.stat(filePath);
-  const fileSize = stat.size;
-
-  if (fileSize === 0) return [];
-
-  // For small files (< 64KB), just read the whole thing
-  if (fileSize < 65536) {
-    const content = await fs.promises.readFile(filePath, "utf-8");
-    const lines = content.trim().split("\n");
-    return lines.slice(-n);
-  }
-
-  // For large files, read chunks from the end
-  const fd = await fs.promises.open(filePath, "r");
-  try {
-    const lines: string[] = [];
-    let remaining = "";
-    let position = fileSize;
-
-    while (lines.length < n && position > 0) {
-      const chunkSize = Math.min(READ_CHUNK_SIZE, position);
-      position -= chunkSize;
-      const buf = Buffer.alloc(chunkSize);
-      await fd.read(buf, 0, chunkSize, position);
-      const chunk = buf.toString("utf-8") + remaining;
-      const parts = chunk.split("\n");
-      // The first element is a partial line (unless we're at the start)
-      remaining = parts[0];
-      // Add complete lines from this chunk (in reverse, we'll reverse later)
-      for (let i = parts.length - 1; i >= 1; i--) {
-        const line = parts[i].trim();
-        if (line) lines.push(line);
-        if (lines.length >= n) break;
-      }
-    }
-
-    // If we reached the start of the file, include the remaining partial line
-    if (position === 0 && remaining.trim() && lines.length < n) {
-      lines.push(remaining.trim());
-    }
-
-    return lines.reverse();
-  } finally {
-    await fd.close();
-  }
-}
 
 // Determine session status from the last JSONL entry
 function getSessionStatus(lastEntry: Record<string, unknown>): {
@@ -290,22 +203,6 @@ function getSessionStatus(lastEntry: Record<string, unknown>): {
 }
 
 /** Validate that a resolved path stays within an expected base directory. */
-function isWithinDir(filePath: string, baseDir: string): boolean {
-  const resolved = path.resolve(filePath);
-  const resolvedBase = path.resolve(baseDir) + path.sep;
-  if (!(resolved.startsWith(resolvedBase) || resolved === path.resolve(baseDir))) {
-    return false;
-  }
-  // Also resolve symlinks and check real path to prevent symlink-based escapes
-  try {
-    const realPath = fs.realpathSync(resolved);
-    const realBase = fs.realpathSync(baseDir) + path.sep;
-    return realPath.startsWith(realBase) || realPath === fs.realpathSync(baseDir);
-  } catch {
-    // If realpath fails (e.g., file doesn't exist yet), fall back to resolved check
-    return true;
-  }
-}
 
 /**
  * Read the last N lines of a JSONL conversation file.
@@ -385,6 +282,7 @@ export async function getActiveSessions(): Promise<ClaudeSession[]> {
         projectName: projectNameFromPath(data.cwd),
         lastMessage,
         slug,
+        provider: "claude",
       });
     } catch {
       // Skip invalid session files
@@ -470,7 +368,7 @@ export async function getProjects(): Promise<ProjectSummary[]> {
       sessionCount: jsonlFiles.length,
       lastActivity,
       totalTokens,
-      cost: calculateCost(totalTokens),
+      cost: calculateClaudeCost(totalTokens),
     });
   }
 
@@ -606,7 +504,7 @@ export async function getProjectDetail(
     sessionCount: jsonlFiles.length,
     lastActivity,
     totalTokens,
-    cost: calculateCost(totalTokens),
+    cost: calculateClaudeCost(totalTokens),
     sessions: projectSessions,
     subagents,
     memoryFiles,
@@ -617,20 +515,6 @@ export async function getProjectDetail(
   };
 }
 
-function cronToHuman(cron: string): string {
-  const parts = cron.split(" ");
-  if (parts.length !== 5) return cron;
-  const [min, hour, , , dow] = parts;
-  const time = `~${hour}:${min.padStart(2, "0")}`;
-  const days: Record<string, string> = {
-    "0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday",
-    "4": "Thursday", "5": "Friday", "6": "Saturday", "7": "Sunday",
-  };
-  if (dow === "*") return `Every day at ${time}`;
-  if (dow === "1-5") return `Weekdays at ${time}`;
-  if (days[dow]) return `Every ${days[dow]} at ${time}`;
-  return `Cron: ${cron}`;
-}
 
 export async function getScheduledTasks(): Promise<ScheduledTask[]> {
   const tasks: ScheduledTask[] = [];
@@ -909,7 +793,7 @@ export async function getOverview(): Promise<DashboardOverview> {
     awaitingInput: awaitingInput.length,
     totalTokensToday: todayTokens,
     totalTokensMonth: monthlyTokens,
-    totalCost: calculateCost(todayTokens),
+    totalCost: calculateClaudeCost(todayTokens),
     activeProjects: projects.filter((p) => {
       return (
         p.lastActivity &&
@@ -985,9 +869,10 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
         endedAt: aliveIds.has(sessionId) ? undefined : lastTimestamp || stat.mtime.toISOString(),
         entrypoint: active?.entrypoint || "cli",
         totalTokens,
-        cost: calculateCost(totalTokens),
+        cost: calculateClaudeCost(totalTokens),
         messageCount,
         status: active?.status || (aliveIds.has(sessionId) ? "running" : "dead"),
+        provider: "claude",
       });
     }
   }
@@ -1273,7 +1158,7 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
     const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const day = dailyMap.get(dateKey);
     if (day) {
-      const cost = calculateCost(day.tokens);
+      const cost = calculateClaudeCost(day.tokens);
       result.push({
         date: dateKey,
         ...day.tokens,
@@ -1371,7 +1256,7 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
       id: dir.name,
       name: projectNameFromPath(realPath),
       totalTokens,
-      cost: calculateCost(totalTokens),
+      cost: calculateClaudeCost(totalTokens),
       sessionCount: files.length,
       lastActivity,
       errorCount,
@@ -1419,9 +1304,9 @@ export async function getInstalledPlugins(): Promise<InstalledPlugin[]> {
 }
 
 /**
- * Get system status: CLI version, active session count, API reachability.
+ * Get Claude-specific system status: CLI version and Anthropic API reachability.
  */
-export async function getSystemStatus(): Promise<SystemStatus> {
+export async function getClaudeProviderStatus(): Promise<ProviderStatus> {
   let cliVersion = "unknown";
   try {
     cliVersion = execFileSync("claude", ["--version"], {
@@ -1432,10 +1317,6 @@ export async function getSystemStatus(): Promise<SystemStatus> {
     // CLI not installed or not in PATH
   }
 
-  const sessions = await getActiveSessions();
-  const activeSessions = sessions.filter((s) => s.isAlive).length;
-
-  // Quick check of Anthropic API status page
   let apiStatus: "operational" | "degraded" | "unknown" = "unknown";
   try {
     const controller = new AbortController();
@@ -1453,5 +1334,19 @@ export async function getSystemStatus(): Promise<SystemStatus> {
     // Network error or timeout
   }
 
-  return { cliVersion, activeSessions, apiStatus };
+  return { cliVersion, apiStatus };
+}
+
+/**
+ * Get system status: CLI version, active session count, API reachability.
+ */
+export async function getSystemStatus(): Promise<SystemStatus> {
+  const [claude, sessions] = await Promise.all([
+    getClaudeProviderStatus(),
+    getActiveSessions(),
+  ]);
+  return {
+    claude,
+    activeSessions: sessions.filter((s) => s.isAlive).length,
+  };
 }

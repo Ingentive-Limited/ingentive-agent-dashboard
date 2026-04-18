@@ -1,6 +1,7 @@
 "use client";
 
 import { usePolling } from "@/hooks/use-polling";
+import { useProvider } from "@/hooks/use-provider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -84,8 +85,9 @@ function PluginCard({ plugin }: { plugin: InstalledPlugin }) {
 }
 
 export default function PluginsPage() {
+  const { provider } = useProvider();
   const { data: plugins, isLoading } = usePolling<InstalledPlugin[]>(
-    "/api/plugins",
+    `/api/plugins?provider=${provider}`,
     30000
   );
 
@@ -118,13 +120,16 @@ export default function PluginsPage() {
             <Puzzle className="h-12 w-12 text-muted-foreground/30 mb-4" aria-hidden="true" />
             <p className="text-muted-foreground font-medium">No plugins installed</p>
             <p className="text-sm text-muted-foreground mt-2 max-w-md">
-              Plugins extend Claude Code with new tools and capabilities.
-              Install your first plugin to see it here.
+              {provider === "codex"
+                ? "Codex uses skills to extend capabilities. Add skills to your ~/.codex/skills/ directory."
+                : "Plugins extend Claude Code with new tools and capabilities. Install your first plugin to see it here."}
             </p>
-            <div className="mt-4 rounded-lg bg-muted/50 border px-4 py-3 font-mono text-sm flex items-center gap-2">
-              <code>claude plugin install &lt;plugin-name&gt;</code>
-              <CopyCommand command="claude plugin install" />
-            </div>
+            {provider !== "codex" && (
+              <div className="mt-4 rounded-lg bg-muted/50 border px-4 py-3 font-mono text-sm flex items-center gap-2">
+                <code>claude plugin install &lt;plugin-name&gt;</code>
+                <CopyCommand command="claude plugin install" />
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (

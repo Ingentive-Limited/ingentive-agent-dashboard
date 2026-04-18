@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { usePolling } from "@/hooks/use-polling";
+import { useProvider } from "@/hooks/use-provider";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -275,8 +276,9 @@ function ComparisonPanel({
 }
 
 export default function ProjectsPage() {
+  const { provider } = useProvider();
   const { data: projects, isLoading } = usePolling<ProjectStats[]>(
-    "/api/projects/stats",
+    `/api/projects/stats?provider=${provider}`,
     10000
   );
   const [sortKey, setSortKey] = usePersistedState<SortKey>("projects-sort", "activity");
@@ -458,8 +460,8 @@ export default function ProjectsPage() {
         <EmptyState
           icon={FolderOpen}
           title="No projects found"
-          description="Start a Claude session in any project directory to see it here. Each directory where you use Claude becomes a tracked project."
-          command="cd your-project && claude"
+          description={`Start ${provider === "codex" ? "a Codex" : provider === "claude" ? "a Claude" : "an AI coding"} session in any project directory to see it here. Each directory where you use ${provider === "codex" ? "Codex" : provider === "claude" ? "Claude" : "an AI coding agent"} becomes a tracked project.`}
+          command={provider === "codex" ? "cd your-project && codex" : "cd your-project && claude"}
         />
       ) : grouped ? (
         <div className="space-y-6">

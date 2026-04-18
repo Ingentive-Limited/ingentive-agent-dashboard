@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/hooks/use-polling";
+import { useProvider } from "@/hooks/use-provider";
 import {
   useAwaitingNotifications,
   useNotificationPermission,
@@ -13,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Bell, BellOff, ExternalLink, Settings2, Square, MessageSquare } from "lucide-react";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, formatEntrypoint } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/types";
 import { ConversationViewer } from "@/components/conversation-viewer";
 
@@ -25,15 +26,16 @@ function openSession(session: ClaudeSession) {
       sessionId: session.sessionId,
       cwd: session.cwd,
       entrypoint: session.entrypoint,
+      provider: session.provider,
     }),
   });
 }
 
-function killSession(pid: number): Promise<boolean> {
+function killSession(pid: number, provider?: string): Promise<boolean> {
   return fetch("/api/sessions/kill", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pid }),
+    body: JSON.stringify({ pid, provider }),
   }).then((r) => r.ok);
 }
 
@@ -167,8 +169,9 @@ function NotificationSettings() {
 }
 
 export default function AwaitingPage() {
+  const { provider } = useProvider();
   const { data: sessions, isLoading } = usePolling<ClaudeSession[]>(
-    "/api/sessions",
+    `/api/sessions?provider=${provider}`,
     3000
   );
   const [browserPermission, setBrowserPermission] = useState<"default" | "granted" | "denied">(() => {
@@ -269,7 +272,7 @@ export default function AwaitingPage() {
             <p className="text-muted-foreground font-medium">No sessions awaiting input</p>
             <p className="text-sm text-muted-foreground mt-2 max-w-md">
               You&apos;ll be notified when a session needs your attention.
-              Sessions appear here when Claude finishes a turn and is waiting for your response.
+              Sessions appear here when {provider === "codex" ? "Codex" : provider === "claude" ? "Claude" : "your AI agent"} finishes a turn and is waiting for your response.
             </p>
           </CardContent>
         </Card>
@@ -294,9 +297,7 @@ export default function AwaitingPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary" className="text-xs">
-                      {session.entrypoint === "claude-desktop"
-                        ? "Desktop"
-                        : "CLI"}
+                      {formatEntrypoint(session.entrypoint)}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
                       PID {session.pid}
@@ -367,6 +368,8 @@ export default function AwaitingPage() {
           onOpenChange={(open) => {
             if (!open) setViewingSession(null);
           }}
+          providerName={viewingSession.provider === "codex" ? "Codex" : "Claude"}
+          provider={viewingSession.provider === "codex" ? "codex" : "claude"}
         />
       )}
     </div>

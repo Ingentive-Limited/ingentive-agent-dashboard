@@ -48,8 +48,10 @@ test.describe("System Status Bar", () => {
       await page.waitForTimeout(500);
     }
     await expect(statusBar).toBeVisible({ timeout: 10000 });
-    // Should show API status (OK, Degraded, or Unknown) — use exact text to avoid
-    // matching both "API OK" and the separate "API" billing label
-    await expect(statusBar.getByText(/API (OK|Degraded|Unknown)/)).toBeVisible({ timeout: 5000 });
+    // Should show API status (OK, Degraded, or Unknown). The bar may show status
+    // for both Claude and Codex in "all" provider mode, so we assert at least
+    // one matching row is visible rather than requiring exactly one.
+    const statusText = statusBar.getByText(/API (OK|Degraded|Unknown)/).first();
+    await expect(statusText).toBeVisible({ timeout: 5000 });
   });
 });

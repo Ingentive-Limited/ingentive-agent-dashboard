@@ -6,9 +6,11 @@ import { SystemStatusBar } from "@/components/system-status-bar";
 vi.mock("@/hooks/use-polling", () => ({
   usePolling: vi.fn().mockReturnValue({
     data: {
-      cliVersion: "2.1.104 (Claude Code)",
+      claude: {
+        cliVersion: "2.1.104 (Claude Code)",
+        apiStatus: "operational",
+      },
       activeSessions: 3,
-      apiStatus: "operational",
     },
   }),
 }));
@@ -17,6 +19,13 @@ vi.mock("@/hooks/use-polling", () => ({
 vi.mock("@/hooks/use-billing-mode", () => ({
   useBillingMode: vi.fn().mockReturnValue({ isApi: true, toggle: vi.fn() }),
 }));
+
+// Mock useProvider
+vi.mock("@/hooks/use-provider", () => ({
+  useProvider: vi.fn().mockReturnValue({ provider: "all", setProvider: vi.fn(), isClaude: false, isCodex: false, isAll: true }),
+  ProviderProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+import React from "react";
 
 describe("SystemStatusBar", () => {
   it("renders CLI version", () => {
@@ -29,9 +38,9 @@ describe("SystemStatusBar", () => {
     expect(screen.getByText("3 active")).toBeTruthy();
   });
 
-  it("renders API OK status when operational", () => {
+  it("renders Claude API OK status when operational", () => {
     render(<SystemStatusBar />);
-    expect(screen.getByText("API OK")).toBeTruthy();
+    expect(screen.getByText("Claude API OK")).toBeTruthy();
   });
 
   it("renders billing mode", () => {
@@ -57,14 +66,16 @@ describe("SystemStatusBar - degraded", () => {
     const { usePolling } = await import("@/hooks/use-polling");
     (usePolling as ReturnType<typeof vi.fn>).mockReturnValue({
       data: {
-        cliVersion: "2.1.104",
+        claude: {
+          cliVersion: "2.1.104",
+          apiStatus: "degraded",
+        },
         activeSessions: 0,
-        apiStatus: "degraded",
       },
     });
 
     render(<SystemStatusBar />);
-    expect(screen.getByText("API Degraded")).toBeTruthy();
+    expect(screen.getByText("Claude API Degraded")).toBeTruthy();
   });
 });
 

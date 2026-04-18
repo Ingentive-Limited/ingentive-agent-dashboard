@@ -4,6 +4,7 @@ import { useState } from "react";
 import { usePolling } from "@/hooks/use-polling";
 import { useAwaitingNotifications } from "@/hooks/use-notifications";
 import { useBillingMode } from "@/hooks/use-billing-mode";
+import { useProvider } from "@/hooks/use-provider";
 import { OverviewCards } from "@/components/overview-cards";
 import { TokenChart } from "@/components/token-chart";
 import { TokenBudgetCard } from "@/components/token-budget";
@@ -13,7 +14,7 @@ import { ConversationViewer } from "@/components/conversation-viewer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, formatEntrypoint } from "@/lib/utils";
 import type { DashboardOverview, ClaudeSession, DailyTokenUsage } from "@/lib/types";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -35,15 +36,16 @@ function openSession(session: ClaudeSession) {
       sessionId: session.sessionId,
       cwd: session.cwd,
       entrypoint: session.entrypoint,
+      provider: session.provider,
     }),
   });
 }
 
-function killSession(pid: number): Promise<boolean> {
+function killSession(pid: number, provider?: string): Promise<boolean> {
   return fetch("/api/sessions/kill", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pid }),
+    body: JSON.stringify({ pid, provider }),
   }).then((r) => r.ok);
 }
 
@@ -76,7 +78,7 @@ function SessionRow({
           </span>
         )}
         <Badge variant="secondary" className="text-xs">
-          {session.entrypoint === "claude-desktop" ? "Desktop" : "CLI"}
+          {formatEntrypoint(session.entrypoint)}
         </Badge>
         <Button
           variant="ghost"
@@ -117,8 +119,9 @@ function SessionRow({
 }
 
 export default function DashboardPage() {
-  const { data, isLoading } = usePolling<DashboardOverview>("/api/overview", 5000);
-  const { data: dailyData } = usePolling<DailyTokenUsage[]>("/api/tokens/daily?days=140", 30000);
+  const { provider } = useProvider();
+  const { data, isLoading } = usePolling<DashboardOverview>(`/api/overview?provider=${provider}`, 5000);
+  const { data: dailyData } = usePolling<DailyTokenUsage[]>(`/api/tokens/daily?days=140&provider=${provider}`, 30000);
   const { toggle, isApi } = useBillingMode();
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
   const [viewingSession, setViewingSession] = useState<ClaudeSession | null>(null);
@@ -278,7 +281,7 @@ export default function DashboardPage() {
         <CardContent>
           {nonAwaitingSessions.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No active sessions. Run <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">claude</code> in a project directory to start one.
+              No active sessions. Run <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">{provider === "codex" ? "codex" : provider === "claude" ? "claude" : "claude or codex"}</code> in a project directory to start one.
             </p>
           ) : (
             <div className="space-y-3">
@@ -355,6 +358,8 @@ export default function DashboardPage() {
           onOpenChange={(open) => {
             if (!open) setViewingSession(null);
           }}
+          providerName={viewingSession.provider === "codex" ? "Codex" : "Claude"}
+          provider={viewingSession.provider === "codex" ? "codex" : "claude"}
         />
       )}
     </div>

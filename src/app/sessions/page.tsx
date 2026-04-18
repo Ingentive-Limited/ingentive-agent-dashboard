@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { usePolling } from "@/hooks/use-polling";
+import { useProvider } from "@/hooks/use-provider";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, formatEntrypoint } from "@/lib/utils";
 import type { ClaudeSession } from "@/lib/types";
 import { ExternalLink, Square, MessageSquare, CheckSquare, XSquare, Terminal } from "lucide-react";
 import { ConversationViewer } from "@/components/conversation-viewer";
@@ -28,21 +29,23 @@ function openSession(session: ClaudeSession) {
       sessionId: session.sessionId,
       cwd: session.cwd,
       entrypoint: session.entrypoint,
+      provider: session.provider,
     }),
   });
 }
 
-function killSession(pid: number): Promise<boolean> {
+function killSession(pid: number, provider?: string): Promise<boolean> {
   return fetch("/api/sessions/kill", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pid }),
+    body: JSON.stringify({ pid, provider }),
   }).then((r) => r.ok);
 }
 
 export default function SessionsPage() {
+  const { provider } = useProvider();
   const { data: sessions, isLoading } = usePolling<ClaudeSession[]>(
-    "/api/sessions",
+    `/api/sessions?provider=${provider}`,
     5000
   );
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set());
@@ -190,8 +193,8 @@ export default function SessionsPage() {
                   <EmptyState
                     icon={Terminal}
                     title="No active sessions"
-                    description="Start a Claude session in any project directory to see it here."
-                    command="claude"
+                    description={`Start ${provider === "codex" ? "a Codex" : provider === "claude" ? "a Claude" : "an AI coding"} session in any project directory to see it here.`}
+                    command={provider === "codex" ? "codex" : "claude"}
                   />
                 </TableCell>
               </TableRow>
@@ -226,7 +229,7 @@ export default function SessionsPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="text-xs">
-                      {session.entrypoint === "claude-desktop" ? "Desktop" : "CLI"}
+                      {formatEntrypoint(session.entrypoint)}
                     </Badge>
                   </TableCell>
                   <TableCell className="max-w-[300px] truncate text-xs text-muted-foreground font-mono" title={session.cwd}>
@@ -286,6 +289,8 @@ export default function SessionsPage() {
           onOpenChange={(open) => {
             if (!open) setViewingSession(null);
           }}
+          providerName={viewingSession.provider === "codex" ? "Codex" : "Claude"}
+          provider={viewingSession.provider === "codex" ? "codex" : "claude"}
         />
       )}
     </div>

@@ -2,6 +2,7 @@
 
 import { use } from "react";
 import { usePolling } from "@/hooks/use-polling";
+import { useProvider } from "@/hooks/use-provider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -25,8 +26,9 @@ export default function ProjectDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { provider } = useProvider();
   const { data: project, isLoading } = usePolling<ProjectDetail>(
-    `/api/projects/${encodeURIComponent(id)}`,
+    `/api/projects/${encodeURIComponent(id)}?provider=${provider}`,
     10000
   );
 

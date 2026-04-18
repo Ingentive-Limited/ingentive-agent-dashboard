@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cn, formatDuration, formatTokens, formatCost, formatRelativeTime } from "@/lib/utils";
+import { cn, formatDuration, formatTokens, formatCost, formatRelativeTime, formatEntrypoint } from "@/lib/utils";
 
 describe("cn", () => {
   it("merges class names", () => {
@@ -116,5 +116,44 @@ describe("formatRelativeTime", () => {
 
   it("formats days ago", () => {
     expect(formatRelativeTime("2026-04-10T12:00:00Z")).toBe("2d ago");
+  });
+});
+
+describe("formatEntrypoint", () => {
+  it("maps claude-desktop to Desktop", () => {
+    expect(formatEntrypoint("claude-desktop")).toBe("Desktop");
+  });
+
+  it("maps vscode to VSCode (Codex VSCode extension)", () => {
+    expect(formatEntrypoint("vscode")).toBe("VSCode");
+  });
+
+  it("maps codex_desktop to Desktop (Codex Desktop app)", () => {
+    expect(formatEntrypoint("codex_desktop")).toBe("Desktop");
+  });
+
+  it("maps desktop to Desktop", () => {
+    expect(formatEntrypoint("desktop")).toBe("Desktop");
+  });
+
+  it("maps cli to CLI", () => {
+    expect(formatEntrypoint("cli")).toBe("CLI");
+  });
+
+  it("maps undefined to CLI as a safe default", () => {
+    expect(formatEntrypoint(undefined)).toBe("CLI");
+  });
+
+  it("maps empty string to CLI", () => {
+    expect(formatEntrypoint("")).toBe("CLI");
+  });
+
+  it("capitalizes unknown entrypoints rather than hiding them", () => {
+    expect(formatEntrypoint("jetbrains")).toBe("Jetbrains");
+  });
+
+  it("is case-insensitive for known values", () => {
+    expect(formatEntrypoint("VSCODE")).toBe("VSCode");
+    expect(formatEntrypoint("Claude-Desktop")).toBe("Desktop");
   });
 });

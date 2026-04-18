@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { usePolling } from "@/hooks/use-polling";
+import { useProvider } from "@/hooks/use-provider";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -15,19 +16,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDuration, formatTokens, formatCost, formatRelativeTime } from "@/lib/utils";
+import { formatDuration, formatTokens, formatCost, formatRelativeTime, formatEntrypoint } from "@/lib/utils";
 import type { SessionHistory, ConversationMessage } from "@/lib/types";
 import { ChevronDown, ChevronRight, History, AlertCircle, Download } from "lucide-react";
 import { exportCSV, exportJSON } from "@/lib/export";
 import { EmptyState } from "@/components/empty-state";
 
-function ConversationPreview({ sessionId }: { sessionId: string }) {
+function ConversationPreview({ sessionId, provider }: { sessionId: string; provider: string }) {
   const { data: messages } = usePolling<ConversationMessage[]>(
-    `/api/sessions/preview?id=${sessionId}`,
-    0 // no polling, one-time fetch
+    `/api/sessions/preview?id=${sessionId}&provider=${provider}`,
+    0
   );
   const { data: errors } = usePolling<string[]>(
-    `/api/sessions/errors?id=${sessionId}`,
+    `/api/sessions/errors?id=${sessionId}&provider=${provider}`,
     0
   );
 
@@ -95,8 +96,9 @@ function ConversationPreview({ sessionId }: { sessionId: string }) {
 }
 
 export default function HistoryPage() {
+  const { provider } = useProvider();
   const { data: history, isLoading } = usePolling<SessionHistory[]>(
-    "/api/history",
+    `/api/history?provider=${provider}`,
     15000
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -189,8 +191,8 @@ export default function HistoryPage() {
         <EmptyState
           icon={History}
           title="No session history found"
-          description="Session history will appear here after you start using Claude. Each conversation is tracked with token usage and duration."
-          command="claude"
+          description={`Session history will appear here after you start using ${provider === "codex" ? "Codex" : provider === "claude" ? "Claude" : "an AI coding agent"}. Each conversation is tracked with token usage and duration.`}
+          command={provider === "codex" ? "codex" : "claude"}
         />
       ) : (
         <div className="rounded-lg border">
@@ -254,14 +256,14 @@ export default function HistoryPage() {
                     )}
                     <TableCell>
                       <Badge variant="secondary" className="text-xs">
-                        {session.entrypoint === "claude-desktop" ? "Desktop" : "CLI"}
+                        {formatEntrypoint(session.entrypoint)}
                       </Badge>
                     </TableCell>
                   </TableRow>
                   {expanded.has(session.sessionId) && (
                     <TableRow>
                       <TableCell colSpan={isApi ? 8 : 7} className="p-0">
-                        <ConversationPreview sessionId={session.sessionId} />
+                        <ConversationPreview sessionId={session.sessionId} provider={provider} />
                       </TableCell>
                     </TableRow>
                   )}

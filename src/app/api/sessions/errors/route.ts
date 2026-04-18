@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionErrors } from "@/lib/claude-data";
+import { getSessionErrors, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +8,7 @@ const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+    const provider = parseProvider(searchParams.get("provider"));
     const sessionId = searchParams.get("id");
     if (!sessionId || !SESSION_ID_RE.test(sessionId)) {
       return NextResponse.json(
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
         { status: 400 }
       );
     }
-    const errors = await getSessionErrors(sessionId);
+    const errors = await getSessionErrors(sessionId, provider);
     return NextResponse.json(errors);
   } catch {
     return NextResponse.json(

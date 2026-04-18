@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { getInstalledPlugins } from "@/lib/claude-data";
+import { getInstalledPlugins, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const plugins = await getInstalledPlugins();
+    const { searchParams } = new URL(request.url);
+    const provider = parseProvider(searchParams.get("provider"));
+    const plugins = await getInstalledPlugins(provider);
     return NextResponse.json(plugins);
   } catch {
     return NextResponse.json(

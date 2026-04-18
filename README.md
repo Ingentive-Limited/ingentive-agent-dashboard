@@ -1,32 +1,36 @@
 # Ingentive Agent OS
 
-A local management dashboard for monitoring and interacting with your active Claude Code sessions, projects, token usage, and scheduled tasks. Works on macOS, Windows, and Linux.
+A local management dashboard for monitoring and interacting with your active **Claude Code** and **OpenAI Codex** sessions, projects, token usage, and scheduled tasks. Works on macOS, Windows, and Linux.
 
 ![Ingentive Agent OS Dashboard](preview.png)
 
-Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Claude Desktop app storage to give you real-time visibility into everything Claude is doing on your machine.
+Ingentive Agent OS reads data directly from `~/.claude/` and `~/.codex/` on your filesystem — plus the Claude Desktop app storage — to give you real-time visibility into everything your AI coding agents are doing on your machine. Switch between providers with a single click, or view sessions from both side-by-side.
 
 ## Features
 
+- **Multi-provider support** - Monitor Claude Code and OpenAI Codex sessions in one dashboard. A provider switcher in the sidebar filters every page to Claude, Codex, or both. Codex sessions are picked up whether they originate from the `codex` CLI, the Codex Desktop app, or the Codex VSCode extension
 - **Dashboard** - Overview of active sessions, token usage, estimated costs, active projects, scheduled tasks, and a token usage chart
-- **Sessions** - Live session list with status indicators (running, processing, idle, awaiting input), PID, duration, and entrypoint (CLI/Desktop)
-- **Awaiting Input** - Sessions where Claude is waiting for your response, with configurable browser notifications (sound, status filters)
-- **Session History** - Full history of all sessions (active and dead) with expandable conversation preview and error surfacing
-- **Projects** - All Claude projects with session counts, last activity, token summaries, and cost estimates. Sort by name, activity, tokens, cost, or sessions. Group by parent directory
+- **Sessions** - Live session list with status indicators (running, processing, idle, awaiting input), PID, duration, and entrypoint (CLI / Desktop / VSCode)
+- **Awaiting Input** - Sessions where your agent is waiting for your response (including Codex `request_user_input` prompts), with configurable browser notifications
+- **Session History** - Full history of all sessions (active and dead) with expandable conversation preview and error surfacing, for both providers
+- **Projects** - All projects with session counts, last activity, token summaries, and cost estimates. Sort by name, activity, tokens, cost, or sessions. Group by parent directory
 - **Project Detail** - Per-project view with session history, token usage charts, subagents, and memory files
-- **Token Usage** - Stacked charts showing input/output/cache token breakdown per project
+- **Token Usage** - Stacked charts showing input/output/cache token breakdown per project, with per-provider pricing (Claude Sonnet 4 vs. GPT-5.3-codex)
 - **Scheduled Tasks** - All scheduled tasks grouped by project, pulled from Claude Desktop
 - **Global Search** - Search across projects, sessions, and conversations with Cmd/Ctrl+K
-- **Cost Tracking** - Estimated USD costs based on Anthropic API pricing (Sonnet 4), with an API/Subscription toggle to hide costs for subscription users
-- **Session Interaction** - Click any session to open it directly in your terminal via `claude -r`
+- **Cost Tracking** - Estimated USD costs based on each provider's API pricing, with an API/Subscription toggle to hide costs for subscription users
+- **Session Interaction** - Click any session to open it directly in your terminal via `claude -r` or `codex --resume`
+- **Conversation Viewer** - Inline viewer that renders both Claude's tool-use blocks and Codex's output messages, with correct speaker labels
+- **System Status** - Live API health indicators for both Claude (status.anthropic.com) and Codex (status.openai.com), plus CLI versions
 - **Dark/Light Mode** - Full theme support with the Ingentive brand
 
 ## Tech Stack
 
-- Next.js 15 (App Router) + TypeScript
+- Next.js 16 (App Router) + TypeScript
 - shadcn/ui v4 + Tailwind CSS v4
 - Recharts for token usage charts
 - SWR for client-side polling (5s refresh)
+- better-sqlite3 for reading Codex's local SQLite state
 - next-themes for dark/light mode
 - Vitest + Testing Library for unit tests
 - Playwright for end-to-end tests
@@ -35,17 +39,21 @@ Ingentive Agent OS reads data directly from the `~/.claude/` filesystem and Clau
 
 - Node.js 18+
 - npm
-- Claude Code or Claude Desktop installed
+- At least one of: Claude Code / Claude Desktop, or OpenAI Codex CLI / Codex Desktop / Codex VSCode extension
+
+You don't need both providers installed — the dashboard detects what's available and shows whichever sessions exist. If neither directory is present, it starts with an empty state.
 
 ## Platform Support
 
 Ingentive Agent OS supports macOS, Windows, and Linux. Session data is read from platform-appropriate locations, and clicking a session opens it in the native terminal for each OS.
 
-| Platform | Claude data directory | App data directory | Terminal |
-|----------|----------------------|--------------------|----------|
-| macOS | `~/.claude/` | `~/Library/Application Support/Claude/` | Terminal.app |
-| Windows | `%USERPROFILE%\.claude\` | `%APPDATA%\Claude\` | cmd.exe |
-| Linux | `~/.claude/` | `$XDG_CONFIG_HOME/Claude/` (default: `~/.config/Claude/`) | gnome-terminal, konsole, or xterm |
+| Platform | Claude data directory | Codex data directory | Terminal |
+|----------|----------------------|---------------------|----------|
+| macOS | `~/.claude/` | `~/.codex/` | Terminal.app |
+| Windows | `%USERPROFILE%\.claude\` | `%USERPROFILE%\.codex\` | cmd.exe |
+| Linux | `~/.claude/` | `~/.codex/` | gnome-terminal, konsole, or xterm |
+
+Claude Desktop app data is additionally read from `~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows, and `$XDG_CONFIG_HOME/Claude/` (default `~/.config/Claude/`) on Linux.
 
 ## Getting Started
 
@@ -116,7 +124,9 @@ A GitHub Actions workflow (`.github/workflows/test.yml`) runs on every pull requ
 
 ## Data Sources
 
-All data is read server-side from the local filesystem. No external APIs or databases are required.
+All data is read server-side from the local filesystem. No external APIs or databases are required (except opt-in public status page checks at `status.anthropic.com` and `status.openai.com`).
+
+### Claude
 
 | Source | Location | Data |
 |--------|----------|------|
@@ -126,17 +136,41 @@ All data is read server-side from the local filesystem. No external APIs or data
 | Scheduled Tasks | `<app-data-dir>/local-agent-mode-sessions/**/scheduled-tasks.json` | Task definitions, schedules, last run times |
 | Task Definitions | Referenced via `filePath` in scheduled-tasks.json | Task descriptions and prompts |
 
+### Codex
+
+| Source | Location | Data |
+|--------|----------|------|
+| Threads | `~/.codex/state_5.sqlite` (`threads` table, read-only) | Session IDs, cwd, source (cli/vscode/desktop), token counts, archived state |
+| Conversations | Path in `threads.rollout_path`, typically `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | `event_msg` / `response_item` entries, user input requests, tool calls |
+| Subagents | `~/.codex/state_5.sqlite` (`thread_spawn_edges` table) | Parent/child thread relationships |
+| Skills | `~/.codex/skills/*.md` | Installed Codex skills |
+
+Codex does not expose a native scheduled-tasks concept, so the Scheduled Tasks view is Claude-only.
+
 ## Session Status Detection
 
-Session status is determined by reading the last entry in each session's JSONL conversation log:
+Session status is determined by reading the last meaningful entry in each session's JSONL conversation log. Both providers map to the same six statuses but use different event formats.
+
+### Claude
 
 | Last Entry | Status |
 |-----------|--------|
 | Assistant message with `stop_reason: "end_turn"` | Awaiting input |
-| Assistant message with `AskUserQuestion` tool use | Needs attention |
+| Assistant message with `AskUserQuestion` / `ExitPlanMode` tool use | Needs attention |
 | Assistant message with `stop_reason: "tool_use"` | Running |
 | User message | Processing |
 | PID not alive | Dead |
+
+### Codex
+
+| Last Entry | Status |
+|-----------|--------|
+| `updated_at` within the last 5 seconds | Running (model actively generating) |
+| `response_item` with `role: "assistant"` | Awaiting input |
+| `response_item` `function_call` named `request_user_input` / `ask_user` | Needs attention (question surfaced as last message) |
+| `response_item` `function_call` (tool running) or `function_call_output` | Running |
+| `event_msg` with `user_message` | Processing |
+| `archived = 1` in SQLite | Dead |
 
 ## License
 

@@ -8,7 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { formatTokens } from "@/lib/utils";
-import { Settings2, AlertTriangle, TrendingUp, X } from "lucide-react";
+import { Settings2, AlertTriangle, TrendingUp, X, Bell } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { TokenUsage } from "@/lib/types";
 
 function formatLimit(tokens: number): string {
@@ -148,9 +153,6 @@ export function TokenBudgetCard({
   const status = checkBudget(dailyUsed, monthlyUsed);
 
   return (
-    <>
-      {budget.enabled && <TokenBudgetAlert status={status} />}
-
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -163,6 +165,42 @@ export function TokenBudgetCard({
                 <Badge variant="outline" className="text-xs">Inactive</Badge>
               )}
             </div>
+            <div className="flex items-center gap-1">
+              {budget.enabled && (status.dailyAlert || status.monthlyAlert) && (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <span
+                      className={`flex items-center justify-center h-8 w-8 rounded-md ${
+                        status.dailyExceeded || status.monthlyExceeded
+                          ? "text-destructive"
+                          : "text-amber-500"
+                      }`}
+                      role="status"
+                      aria-label={
+                        status.dailyExceeded || status.monthlyExceeded
+                          ? "Token budget exceeded"
+                          : "Approaching token budget limit"
+                      }
+                    >
+                      <Bell className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs text-xs">
+                    {status.dailyExceeded && (
+                      <p>Daily budget exceeded ({formatTokens(status.dailyUsed)} used)</p>
+                    )}
+                    {!status.dailyExceeded && status.dailyAlert && (
+                      <p>Approaching daily limit ({Math.round(status.dailyPercent)}%)</p>
+                    )}
+                    {status.monthlyExceeded && (
+                      <p>Monthly budget exceeded ({formatTokens(status.monthlyUsed)} used)</p>
+                    )}
+                    {!status.monthlyExceeded && status.monthlyAlert && (
+                      <p>Approaching monthly limit ({Math.round(status.monthlyPercent)}%)</p>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              )}
             <Button
               variant="ghost"
               size="icon"
@@ -178,6 +216,7 @@ export function TokenBudgetCard({
             >
               <Settings2 className="h-4 w-4" aria-hidden="true" />
             </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -312,6 +351,5 @@ export function TokenBudgetCard({
           )}
         </CardContent>
       </Card>
-    </>
   );
 }

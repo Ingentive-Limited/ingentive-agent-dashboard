@@ -12,6 +12,13 @@ vi.mock("next-themes", () => ({
   useTheme: () => ({ resolvedTheme: "dark" }),
 }));
 
+// Mock useProvider
+vi.mock("@/hooks/use-provider", () => ({
+  useProvider: vi.fn().mockReturnValue({ provider: "all", setProvider: vi.fn(), isClaude: false, isCodex: false, isAll: true }),
+  ProviderProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+import React from "react";
+
 // Mock SWR/polling
 const mockPlugins = [
   {

@@ -21,7 +21,7 @@ const robotoMono = Roboto_Mono({
 
 export const metadata: Metadata = {
   title: "Ingentive Agent OS",
-  description: "Claude Code Management Dashboard",
+  description: "AI Agent Management Dashboard",
 };
 
 export default function RootLayout({
@@ -35,7 +35,7 @@ export default function RootLayout({
       className={`${roboto.variable} ${robotoMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col font-[family-name:var(--font-roboto)]">
+      <body className="min-h-full flex flex-col font-[family-name:var(--font-roboto)]" suppressHydrationWarning>
         <Providers>
           <SidebarProvider>
             <a

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { getSessionHistory } from "@/lib/claude-data";
+import { getSessionHistory, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const history = await getSessionHistory();
+    const { searchParams } = new URL(request.url);
+    const provider = parseProvider(searchParams.get("provider"));
+    const history = await getSessionHistory(provider);
     return NextResponse.json(history);
   } catch {
     return NextResponse.json(

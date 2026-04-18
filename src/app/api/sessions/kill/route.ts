@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import { execFileSync } from "child_process";
-import { getActiveSessions } from "@/lib/claude-data";
+import { getActiveSessions, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
-/** Verify the PID is still a Claude process right before kill (mitigate TOCTOU). */
-function verifyClaudeProcess(pid: number): boolean {
+/** Verify the PID is still an agent process right before kill (mitigate TOCTOU). */
+function verifyAgentProcess(pid: number): boolean {
   try {
-    // Use execFileSync (no shell) to safely check the process name
     const result = execFileSync("ps", ["-p", String(pid), "-o", "comm="], {
       timeout: 2000,
       encoding: "utf-8",
     }).trim().toLowerCase();
-    return result.includes("claude") || result.includes("node");
+    return result.includes("claude") || result.includes("codex") || result.includes("node");
   } catch {
     return false;
   }
@@ -20,7 +19,8 @@ function verifyClaudeProcess(pid: number): boolean {
 
 export async function POST(request: Request) {
   try {
-    const { pid } = await request.json();
+    const { pid, provider: providerParam } = await request.json();
+    const provider = parseProvider(providerParam);
 
     if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
       return NextResponse.json(
@@ -29,20 +29,20 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify the PID belongs to a known Claude session
-    const sessions = await getActiveSessions();
-    const isClaudeSession = sessions.some((s) => s.pid === pid && s.isAlive);
-    if (!isClaudeSession) {
+    // Verify the PID belongs to a known session
+    const sessions = await getActiveSessions(provider);
+    const isKnownSession = sessions.some((s) => s.pid === pid && s.isAlive);
+    if (!isKnownSession) {
       return NextResponse.json(
-        { error: "Not a known Claude session" },
+        { error: "Not a known session" },
         { status: 403 }
       );
     }
 
     // Re-verify process name immediately before kill to reduce TOCTOU window
-    if (!verifyClaudeProcess(pid)) {
+    if (!verifyAgentProcess(pid)) {
       return NextResponse.json(
-        { error: "Process is no longer a Claude session" },
+        { error: "Process is no longer an active session" },
         { status: 409 }
       );
     }
