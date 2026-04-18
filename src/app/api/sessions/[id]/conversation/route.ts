@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
-import { findSessionJsonl, readConversationLines } from "@/lib/claude-data";
+import {
+  findSessionJsonl,
+  readConversationLines,
+  getConversationPreview,
+  parseProvider,
+} from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
@@ -59,10 +64,12 @@ function summarizeContentBlocks(
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const { searchParams } = new URL(request.url);
+  const provider = parseProvider(searchParams.get("provider"));
 
   if (!SESSION_ID_RE.test(id)) {
     return NextResponse.json(
@@ -71,7 +78,29 @@ export async function GET(
     );
   }
 
-  const jsonlPath = findSessionJsonl(id);
+  // Codex sessions use a completely different JSONL format than Claude
+  // (event_msg/response_item vs human/assistant). Delegate to the Codex-specific
+  // parser in getConversationPreview, then translate to this route's shape so
+  // the existing ConversationViewer component can render it without changes.
+  if (provider === "codex") {
+    try {
+      const previews = await getConversationPreview(id, MAX_MESSAGES, "codex");
+      const messages = previews.map((m) => ({
+        // Map Codex role → this route's entry.type
+        type: m.role === "user" ? "human" : "assistant",
+        content: [{ type: "text", text: m.text }],
+        timestamp: m.timestamp,
+      }));
+      return NextResponse.json({ messages });
+    } catch {
+      return NextResponse.json(
+        { error: "Failed to read conversation log" },
+        { status: 500 }
+      );
+    }
+  }
+
+  const jsonlPath = findSessionJsonl(id, "claude");
   if (!jsonlPath || !fs.existsSync(jsonlPath)) {
     return NextResponse.json(
       { error: "Conversation log not found" },

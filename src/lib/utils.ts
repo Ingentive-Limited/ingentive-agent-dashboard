@@ -5,6 +5,31 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * Convert a session entrypoint identifier into a user-facing label.
+ *
+ * Claude entrypoints:
+ *   - "claude-desktop" → "Desktop"
+ *   - anything else    → "CLI"
+ *
+ * Codex entrypoints (from the `source` column in ~/.codex/state_5.sqlite):
+ *   - "vscode"                       → "VSCode"
+ *   - "codex_desktop" / "desktop"    → "Desktop"
+ *   - "cli" / "" / undefined         → "CLI"
+ *   - anything else                  → the raw value, title-cased
+ */
+export function formatEntrypoint(entrypoint: string | undefined | null): string {
+  if (!entrypoint) return "CLI";
+  const normalized = entrypoint.toLowerCase();
+  if (normalized === "claude-desktop") return "Desktop";
+  if (normalized === "vscode" || normalized === "vs-code") return "VSCode";
+  if (normalized === "codex_desktop" || normalized === "desktop") return "Desktop";
+  if (normalized === "cli") return "CLI";
+  // Fallback: return the raw value with first letter capitalized so unknown
+  // sources still render something readable.
+  return entrypoint.charAt(0).toUpperCase() + entrypoint.slice(1);
+}
+
 export function formatDuration(startMs: number): string {
   const diff = Date.now() - startMs;
   const hours = Math.floor(diff / (1000 * 60 * 60));

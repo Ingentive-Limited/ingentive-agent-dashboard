@@ -90,7 +90,7 @@ function ToolResultBlock({ block }: { block: ContentBlock }) {
   );
 }
 
-function MessageBubble({ message }: { message: ConversationMessage }) {
+function MessageBubble({ message, assistantName = "Claude" }: { message: ConversationMessage; assistantName?: string }) {
   const isHuman = message.type === "human";
 
   const textContent = message.content
@@ -119,7 +119,7 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
         className={`flex-1 space-y-1 ${isHuman ? "text-right" : ""} max-w-[85%]`}
       >
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-medium">{isHuman ? "You" : "Claude"}</span>
+          <span className="font-medium">{isHuman ? "You" : assistantName}</span>
           {message.timestamp && (
             <span>
               {new Date(message.timestamp).toLocaleTimeString([], {
@@ -169,11 +169,16 @@ export function ConversationViewer({
   projectName,
   open,
   onOpenChange,
+  providerName = "Claude",
+  provider = "claude",
 }: {
   sessionId: string;
   projectName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  providerName?: string;
+  /** Underlying provider for correct server-side JSONL parsing. */
+  provider?: "claude" | "codex";
 }) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -187,7 +192,9 @@ export function ConversationViewer({
 
     const loadConversation = async () => {
       try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/conversation`);
+        const res = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}/conversation?provider=${provider}`
+        );
         if (cancelled) return;
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
@@ -212,7 +219,7 @@ export function ConversationViewer({
     loadConversation();
 
     return () => { cancelled = true; };
-  }, [open, sessionId]);
+  }, [open, sessionId, provider]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -230,7 +237,7 @@ export function ConversationViewer({
           </SheetDescription>
         </SheetHeader>
 
-        <ScrollArea className="flex-1 px-4 pb-4">
+        <ScrollArea className="flex-1 min-h-0 px-4 pb-4">
           {loading ? (
             <div className="space-y-4 py-4" role="status">
               {[...Array(5)].map((_, i) => (
@@ -254,7 +261,9 @@ export function ConversationViewer({
                 onClick={() => {
                   setLoading(true);
                   setError(null);
-                  fetch(`/api/sessions/${encodeURIComponent(sessionId)}/conversation`)
+                  fetch(
+                    `/api/sessions/${encodeURIComponent(sessionId)}/conversation?provider=${provider}`
+                  )
                     .then((r) => r.json())
                     .then((d) => setMessages(d.messages || []))
                     .catch((e) => setError(e.message))
@@ -273,7 +282,7 @@ export function ConversationViewer({
             <ul className="space-y-4 py-4 list-none" role="list" aria-label="Conversation messages">
               {messages.map((msg, i) => (
                 <li key={i}>
-                  <MessageBubble message={msg} />
+                  <MessageBubble message={msg} assistantName={providerName} />
                 </li>
               ))}
               <li ref={bottomRef} aria-hidden="true" />

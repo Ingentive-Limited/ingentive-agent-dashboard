@@ -1,6 +1,7 @@
 "use client";
 
 import { usePolling } from "@/hooks/use-polling";
+import { useProvider } from "@/hooks/use-provider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +10,9 @@ import type { ScheduledTask } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 
 export default function TasksPage() {
+  const { provider } = useProvider();
   const { data: tasks, isLoading } = usePolling<ScheduledTask[]>(
-    "/api/tasks",
+    `/api/tasks?provider=${provider}`,
     10000
   );
 
@@ -44,8 +46,8 @@ export default function TasksPage() {
         <EmptyState
           icon={Clock}
           title="No scheduled tasks"
-          description="Create scheduled tasks to automate recurring Claude workflows. Tasks run on a cron schedule in your projects."
-          command="claude /schedule"
+          description={provider === "codex" ? "Codex CLI does not support scheduled tasks natively." : "Create scheduled tasks to automate recurring Claude workflows. Tasks run on a cron schedule in your projects."}
+          command={provider === "codex" ? undefined : "claude /schedule"}
         />
       ) : (
         <div className="space-y-6">

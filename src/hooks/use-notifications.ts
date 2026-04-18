@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { ClaudeSession } from "@/lib/types";
+import { formatEntrypoint } from "@/lib/utils";
 
 export interface NotificationPreferences {
   enabled: boolean;
@@ -102,11 +103,12 @@ export function useAwaitingNotifications(sessions: ClaudeSession[] | undefined) 
         if (!prevAwaitingRef.current.has(sessionId)) {
           const session = sessions.find((s) => s.sessionId === sessionId);
           if (session) {
+            const agentName = session.provider === "codex" ? "Codex" : "Claude";
             const title =
               session.status === "needs_attention"
-                ? "Claude needs your input"
-                : "Claude is waiting";
-            const body = `${session.projectName} (${session.entrypoint === "claude-desktop" ? "Desktop" : "CLI"})${
+                ? `${agentName} needs your input`
+                : `${agentName} is waiting`;
+            const body = `${session.projectName} (${formatEntrypoint(session.entrypoint)})${
               session.lastMessage
                 ? `\n${session.lastMessage.slice(0, 100)}`
                 : ""

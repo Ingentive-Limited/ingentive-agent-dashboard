@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getProjectDetail } from "@/lib/claude-data";
+import { getProjectDetail, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +11,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const { searchParams } = new URL(request.url);
+    const provider = parseProvider(searchParams.get("provider"));
 
     // Validate project ID to prevent path traversal
     if (!PROJECT_ID_RE.test(id)) {
@@ -20,7 +22,7 @@ export async function GET(
       );
     }
 
-    const project = await getProjectDetail(id);
+    const project = await getProjectDetail(id, provider);
     if (!project) {
       return NextResponse.json(
         { error: "Project not found" },

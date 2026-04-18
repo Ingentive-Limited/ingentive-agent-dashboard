@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
-import { getDailyTokenUsage } from "@/lib/claude-data";
+import { getDailyTokenUsage, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+    const provider = parseProvider(searchParams.get("provider"));
     const daysParam = searchParams.get("days");
     const days = daysParam ? Math.min(Math.max(parseInt(daysParam, 10) || 30, 1), 365) : 30;
 
-    const daily = await getDailyTokenUsage(days);
+    const daily = await getDailyTokenUsage(days, provider);
     return NextResponse.json(daily);
   } catch {
     return NextResponse.json(

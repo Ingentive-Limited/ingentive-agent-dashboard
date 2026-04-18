@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { usePolling } from "@/hooks/use-polling";
+import { useProvider } from "@/hooks/use-provider";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useTheme } from "next-themes";
@@ -102,13 +103,14 @@ function InteractiveLegend({
 }
 
 export default function TokensPage() {
+  const { provider } = useProvider();
   const [dateRange, setDateRange] = usePersistedState<DateRange>("tokens-range", 30);
   const { data: projects, isLoading: projectsLoading } = usePolling<ProjectSummary[]>(
-    "/api/projects",
+    `/api/projects?provider=${provider}`,
     10000
   );
   const { data: dailyData, isLoading: dailyLoading } = usePolling<DailyTokenUsage[]>(
-    `/api/tokens/daily?days=${dateRange}`,
+    `/api/tokens/daily?days=${dateRange}&provider=${provider}`,
     15000
   );
   const { isApi } = useBillingMode();

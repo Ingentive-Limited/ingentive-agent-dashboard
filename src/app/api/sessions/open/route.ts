@@ -3,32 +3,37 @@ import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
+import { isWithinDir } from "@/lib/utils-server";
 
 export const dynamic = "force-dynamic";
 
 const IS_WIN = process.platform === "win32";
 
+// Strict: alphanumeric + hyphen + underscore only. This explicitly excludes
+// every AppleScript-dangerous character (", `, \, $, newline) as well as every
+// shell metacharacter, so by the time we interpolate sessionId below it cannot
+// break out of its string context.
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Opens a terminal with `claude -r <sessionId>` in the given cwd.
  * Uses spawn with the cwd option to avoid shell injection entirely.
  */
-function openSessionInTerminal(cwd: string, sessionId: string) {
+function openSessionInTerminal(cwd: string, sessionId: string, provider: "claude" | "codex" = "claude") {
+  const cli = provider === "codex" ? "codex" : "claude";
+  const resumeArgs = provider === "codex" ? ["--resume", sessionId] : ["-r", sessionId];
+
   if (IS_WIN) {
-    // Windows: open a new cmd.exe window, run claude -r
-    // Use 'start' to open a new window, then run claude directly
-    spawn("cmd.exe", ["/c", "start", "cmd.exe", "/k", "claude", "-r", sessionId], {
+    spawn("cmd.exe", ["/c", "start", "cmd.exe", "/k", cli, ...resumeArgs], {
       cwd,
       detached: true,
       stdio: "ignore",
     }).unref();
   } else if (process.platform === "linux") {
-    // Linux: try common terminal emulators with direct args (no shell interpolation)
     const terminals = [
-      { bin: "gnome-terminal", args: ["--working-directory", cwd, "--", "claude", "-r", sessionId] },
-      { bin: "konsole", args: ["--workdir", cwd, "-e", "claude", "-r", sessionId] },
-      { bin: "xterm", args: ["-e", "claude", "-r", sessionId] },
+      { bin: "gnome-terminal", args: ["--working-directory", cwd, "--", cli, ...resumeArgs] },
+      { bin: "konsole", args: ["--workdir", cwd, "-e", cli, ...resumeArgs] },
+      { bin: "xterm", args: ["-e", cli, ...resumeArgs] },
     ];
 
     function tryTerminal(index: number) {
@@ -47,24 +52,30 @@ function openSessionInTerminal(cwd: string, sessionId: string) {
     }
     tryTerminal(0);
   } else {
-    // macOS: use `open -a Terminal <cwd>` to open Terminal at the directory,
-    // then use osascript to run the claude command in the frontmost Terminal window.
-    // The sessionId is validated by regex AND escaped for AppleScript (defense in depth).
-    const escapedId = sessionId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    // macOS: sessionId has already been validated against SESSION_ID_RE by
+    // the POST handler, so it contains only [a-zA-Z0-9_-] and is safe to
+    // interpolate into an AppleScript string literal without escaping.
+    const command =
+      provider === "codex"
+        ? `codex --resume ${sessionId}`
+        : `claude -r ${sessionId}`;
     const proc = spawn("open", ["-a", "Terminal", cwd], {
       detached: true,
       stdio: "ignore",
     });
     proc.on("close", () => {
-      // Give Terminal a moment to open, then run the command
       setTimeout(() => {
-        spawn("osascript", [
-          "-e",
-          `tell application "Terminal" to do script "claude -r ${escapedId}" in front window`,
-        ], {
-          detached: true,
-          stdio: "ignore",
-        }).unref();
+        spawn(
+          "osascript",
+          [
+            "-e",
+            `tell application "Terminal" to do script "${command}" in front window`,
+          ],
+          {
+            detached: true,
+            stdio: "ignore",
+          }
+        ).unref();
       }, 500);
     });
     proc.unref();
@@ -73,7 +84,7 @@ function openSessionInTerminal(cwd: string, sessionId: string) {
 
 export async function POST(request: Request) {
   try {
-    const { sessionId, cwd } = await request.json();
+    const { sessionId, cwd, provider } = await request.json();
 
     if (!sessionId || !cwd) {
       return NextResponse.json(
@@ -90,13 +101,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate cwd is an absolute path that exists within the user's home
+    // Validate cwd is an absolute path that exists within the user's home.
+    // Uses isWithinDir for symlink-aware containment so a cwd symlink cannot
+    // escape the home directory.
     const resolvedCwd = path.resolve(cwd);
     const homeDir = os.homedir();
     if (
       !path.isAbsolute(resolvedCwd) ||
-      !resolvedCwd.startsWith(homeDir) ||
-      !fs.existsSync(resolvedCwd)
+      !fs.existsSync(resolvedCwd) ||
+      !isWithinDir(resolvedCwd, homeDir)
     ) {
       return NextResponse.json(
         { error: "Invalid working directory" },
@@ -104,7 +117,7 @@ export async function POST(request: Request) {
       );
     }
 
-    openSessionInTerminal(resolvedCwd, sessionId);
+    openSessionInTerminal(resolvedCwd, sessionId, provider === "codex" ? "codex" : "claude");
 
     return NextResponse.json({ success: true });
   } catch {

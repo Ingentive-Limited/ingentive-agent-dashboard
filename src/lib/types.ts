@@ -1,3 +1,5 @@
+export type Provider = "claude" | "codex";
+
 export interface ClaudeSession {
   pid: number;
   sessionId: string;
@@ -11,7 +13,11 @@ export interface ClaudeSession {
   lastMessage?: string;
   slug?: string;
   totalTokens?: TokenUsage;
+  provider: Provider;
+  model?: string;
 }
+
+export type AgentSession = ClaudeSession;
 
 export type SessionStatus =
   | "running"
@@ -26,6 +32,7 @@ export interface TokenUsage {
   output_tokens: number;
   cache_creation_input_tokens: number;
   cache_read_input_tokens: number;
+  reasoning_tokens?: number;
 }
 
 export interface TokenDataPoint {
@@ -106,6 +113,7 @@ export interface SessionHistory {
   cost: CostEstimate;
   messageCount: number;
   status: SessionStatus;
+  provider: Provider;
 }
 
 export interface SearchResult {
@@ -147,10 +155,15 @@ export interface InstalledPlugin {
   lastUpdated: string;
 }
 
-export interface SystemStatus {
+export interface ProviderStatus {
   cliVersion: string;
-  activeSessions: number;
   apiStatus: "operational" | "degraded" | "unknown";
+}
+
+export interface SystemStatus {
+  claude?: ProviderStatus;
+  codex?: ProviderStatus;
+  activeSessions: number;
 }
 
 export interface DashboardOverview {

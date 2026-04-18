@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { getProjectStats } from "@/lib/claude-data";
+import { getProjectStats, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const stats = await getProjectStats();
+    const { searchParams } = new URL(request.url);
+    const provider = parseProvider(searchParams.get("provider"));
+    const stats = await getProjectStats(provider);
     return NextResponse.json(stats);
   } catch {
     return NextResponse.json(
