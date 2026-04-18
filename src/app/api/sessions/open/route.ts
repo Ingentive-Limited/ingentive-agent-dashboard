@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
-import path from "path";
-import fs from "fs";
-import os from "os";
-import { isWithinDir } from "@/lib/utils-server";
+import { getActiveSessions, parseProvider } from "@/lib/agent-data";
 
 export const dynamic = "force-dynamic";
 
@@ -84,11 +81,13 @@ function openSessionInTerminal(cwd: string, sessionId: string, provider: "claude
 
 export async function POST(request: Request) {
   try {
-    const { sessionId, cwd, provider } = await request.json();
+    const body = await request.json();
+    const { sessionId } = body;
+    const requestedProvider = parseProvider(body.provider);
 
-    if (!sessionId || !cwd) {
+    if (!sessionId) {
       return NextResponse.json(
-        { error: "sessionId and cwd are required" },
+        { error: "sessionId is required" },
         { status: 400 }
       );
     }
@@ -101,23 +100,24 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate cwd is an absolute path that exists within the user's home.
-    // Uses isWithinDir for symlink-aware containment so a cwd symlink cannot
-    // escape the home directory.
-    const resolvedCwd = path.resolve(cwd);
-    const homeDir = os.homedir();
-    if (
-      !path.isAbsolute(resolvedCwd) ||
-      !fs.existsSync(resolvedCwd) ||
-      !isWithinDir(resolvedCwd, homeDir)
-    ) {
+    // Look up the session's working directory from our own data source
+    // (the Claude/Codex SQLite/JSONL) rather than trusting the client-supplied
+    // cwd. This means the only way to open a terminal is for an already-known
+    // session, and the cwd is whatever the CLI recorded when the session was
+    // created — not user input at request time.
+    const sessions = await getActiveSessions(requestedProvider);
+    const session = sessions.find((s) => s.sessionId === sessionId);
+    if (!session) {
       return NextResponse.json(
-        { error: "Invalid working directory" },
-        { status: 400 }
+        { error: "Unknown session" },
+        { status: 404 }
       );
     }
 
-    openSessionInTerminal(resolvedCwd, sessionId, provider === "codex" ? "codex" : "claude");
+    const trustedCwd = session.cwd;
+    const resolvedProvider = session.provider === "codex" ? "codex" : "claude";
+
+    openSessionInTerminal(trustedCwd, sessionId, resolvedProvider);
 
     return NextResponse.json({ success: true });
   } catch {
