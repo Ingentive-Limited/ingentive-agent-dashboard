@@ -5,7 +5,7 @@ import { usePolling } from "@/hooks/use-polling";
 import { useProvider } from "@/hooks/use-provider";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import { usePersistedState } from "@/hooks/use-persisted-state";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/hooks/use-theme";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";

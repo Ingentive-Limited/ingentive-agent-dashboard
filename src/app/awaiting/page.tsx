@@ -369,7 +369,7 @@ export default function AwaitingPage() {
             if (!open) setViewingSession(null);
           }}
           providerName={viewingSession.provider === "codex" ? "Codex" : "Claude"}
-          provider={viewingSession.provider === "codex" ? "codex" : "claude"}
+          provider={viewingSession.provider}
         />
       )}
     </div>

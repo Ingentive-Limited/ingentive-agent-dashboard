@@ -290,7 +290,7 @@ export default function SessionsPage() {
             if (!open) setViewingSession(null);
           }}
           providerName={viewingSession.provider === "codex" ? "Codex" : "Claude"}
-          provider={viewingSession.provider === "codex" ? "codex" : "claude"}
+          provider={viewingSession.provider}
         />
       )}
     </div>

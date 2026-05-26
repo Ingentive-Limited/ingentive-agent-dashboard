@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/hooks/use-theme";
 import type { DailyTokenUsage } from "@/lib/types";
 
 const DAYS_OF_WEEK = ["", "Mon", "", "Wed", "", "Fri", ""];

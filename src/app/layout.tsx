@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Roboto, Roboto_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { Providers } from "./providers";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
@@ -7,6 +8,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SearchDialog } from "@/components/search-dialog";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { AppFooter } from "@/components/app-footer";
+import { themeBootstrapScript } from "@/hooks/use-theme";
 
 const roboto = Roboto({
   variable: "--font-roboto",
@@ -32,10 +34,24 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${roboto.variable} ${robotoMono.variable} h-full antialiased`}
+      // Start with dark mode to avoid a flash before the bootstrap script
+      // runs. The script (below) reads localStorage / OS preference and
+      // overrides this class before paint.
+      className={`${roboto.variable} ${robotoMono.variable} dark h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col font-[family-name:var(--font-roboto)]" suppressHydrationWarning>
+        {/*
+          Theme bootstrap: a server-rendered inline script that sets the
+          correct theme class on <html> before React hydrates, eliminating
+          the flash of incorrect theme. Uses next/script with the
+          beforeInteractive strategy so it's executed before our app code.
+          The script body is a static literal from use-theme.tsx — no user
+          input is interpolated into it.
+        */}
+        <Script id="theme-bootstrap" strategy="beforeInteractive">
+          {themeBootstrapScript}
+        </Script>
         <Providers>
           <SidebarProvider>
             <a

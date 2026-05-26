@@ -4,8 +4,20 @@ import {
   findSessionJsonl,
   readConversationLines,
   getConversationPreview,
-  parseProvider,
 } from "@/lib/agent-data";
+
+/**
+ * Conversation-specific provider parsing. Unlike the UI provider filter
+ * (claude / codex / all), the conversation viewer needs to be able to ask
+ * for a "cowork" session explicitly — Cowork lives under the Claude family
+ * in the sidebar but has its own JSONL parser.
+ */
+type ConversationProvider = "claude" | "codex" | "cowork" | "all";
+
+function parseConversationProvider(value: string | null): ConversationProvider {
+  if (value === "claude" || value === "codex" || value === "cowork") return value;
+  return "all";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +81,7 @@ export async function GET(
 ) {
   const { id } = await params;
   const { searchParams } = new URL(request.url);
-  const provider = parseProvider(searchParams.get("provider"));
+  const provider = parseConversationProvider(searchParams.get("provider"));
 
   if (!SESSION_ID_RE.test(id)) {
     return NextResponse.json(

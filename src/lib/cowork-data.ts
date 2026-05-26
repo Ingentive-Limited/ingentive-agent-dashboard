@@ -38,7 +38,6 @@ import type {
   DailyTokenUsage,
   ProjectStats,
   InstalledPlugin,
-  SystemStatus,
   ProviderStatus,
 } from "./types";
 import {
@@ -921,13 +920,7 @@ export async function getCoworkProviderStatus(): Promise<ProviderStatus> {
   return { cliVersion, apiStatus };
 }
 
-export async function getSystemStatus(): Promise<SystemStatus> {
-  const [cowork, sessions] = await Promise.all([
-    getCoworkProviderStatus(),
-    getActiveSessions(),
-  ]);
-  return {
-    cowork,
-    activeSessions: sessions.filter((s) => s.isAlive).length,
-  };
-}
+// Note: there's no provider-scoped `getSystemStatus()` for Cowork. The Cowork
+// experience runs on the same Anthropic API as Claude Code, so health is
+// represented by the Claude row in the system status bar. Callers that want
+// just Cowork's CLI version + API health can use `getCoworkProviderStatus()`.

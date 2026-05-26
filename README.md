@@ -8,7 +8,7 @@ Ingentive Agent OS reads data directly from `~/.claude/`, `~/.codex/`, and the C
 
 ## Features
 
-- **Multi-provider support** - Monitor Claude Code, OpenAI Codex, and Claude Cowork sessions in one dashboard. A provider switcher in the sidebar filters every page to All, Claude, Codex, or Cowork. Codex sessions are picked up whether they originate from the `codex` CLI, the Codex Desktop app, or the Codex VSCode extension; Cowork sessions are read from the Claude Desktop app's local-agent-mode storage
+- **Multi-provider support** - Monitor Claude Code, OpenAI Codex, and Claude Cowork sessions in one dashboard. A provider switcher in the sidebar filters every page to All, Claude, or Codex. Cowork is grouped under "Claude" because both run on Anthropic models — Cowork sessions appear as their own per-workspace projects in the projects list, with the `Cowork` entrypoint badge in the sessions table. Codex sessions are picked up whether they originate from the `codex` CLI, the Codex Desktop app, or the Codex VSCode extension
 - **Dashboard** - Overview of active sessions, token usage, estimated costs, active projects, scheduled tasks, and a token usage chart
 - **Sessions** - Live session list with status indicators (running, processing, idle, awaiting input), PID, duration, and entrypoint (CLI / Desktop / VSCode / Cowork)
 - **Awaiting Input** - Sessions where your agent is waiting for your response (including Codex `request_user_input` prompts and Cowork `AskUserQuestion` turns), with configurable browser notifications

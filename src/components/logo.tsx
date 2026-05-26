@@ -1,6 +1,6 @@
 "use client";
 
-import { useTheme } from "next-themes";
+import { useTheme } from "@/hooks/use-theme";
 import { useSyncExternalStore } from "react";
 
 const subscribe = () => () => {};

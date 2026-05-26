@@ -163,7 +163,6 @@ export interface ProviderStatus {
 export interface SystemStatus {
   claude?: ProviderStatus;
   codex?: ProviderStatus;
-  cowork?: ProviderStatus;
   activeSessions: number;
 }
 

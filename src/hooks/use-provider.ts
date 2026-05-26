@@ -4,7 +4,15 @@ import { createContext, useContext, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import React from "react";
 
-export type ProviderFilter = "all" | "claude" | "codex" | "cowork";
+/**
+ * UI-level provider filter. Cowork sessions are part of the "Claude family"
+ * (both are Anthropic) — they're folded into the "claude" filter rather than
+ * exposed as a separate top-level option. Inside the dashboard each session
+ * still carries its own `session.provider` value (claude / codex / cowork),
+ * which drives entrypoint labels, conversation-viewer routing, and which
+ * actions are enabled per-session.
+ */
+export type ProviderFilter = "all" | "claude" | "codex";
 
 const STORAGE_KEY = "ingentive-provider";
 
@@ -12,7 +20,10 @@ function load(): ProviderFilter {
   if (typeof window === "undefined") return "all";
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    if (v === "all" || v === "claude" || v === "codex" || v === "cowork") return v;
+    if (v === "all" || v === "claude" || v === "codex") return v;
+    // Migrate previous "cowork" selection: that value used to be a top-level
+    // option and now lives under "claude".
+    if (v === "cowork") return "claude";
   } catch {
     // ignore
   }
@@ -24,7 +35,6 @@ interface ProviderContextValue {
   setProvider: (next: ProviderFilter) => void;
   isClaude: boolean;
   isCodex: boolean;
-  isCowork: boolean;
   isAll: boolean;
 }
 
@@ -47,7 +57,6 @@ export function ProviderProvider({ children }: { children: ReactNode }) {
     setProvider,
     isClaude: provider === "claude",
     isCodex: provider === "codex",
-    isCowork: provider === "cowork",
     isAll: provider === "all",
   };
 
