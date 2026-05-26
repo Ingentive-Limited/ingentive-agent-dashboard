@@ -66,6 +66,9 @@ export function SystemStatusBar() {
       {data.codex && (provider === "all" || provider === "codex") && (
         <ProviderStatusRow name="Codex" status={data.codex} />
       )}
+      {data.cowork && (provider === "all" || provider === "cowork") && (
+        <ProviderStatusRow name="Cowork" status={data.cowork} />
+      )}
       <div className="flex items-center gap-1.5" title={`${data.activeSessions} active session${data.activeSessions !== 1 ? "s" : ""}`}>
         <Activity className="h-3 w-3 shrink-0" aria-hidden="true" />
         <span>{data.activeSessions} active</span>

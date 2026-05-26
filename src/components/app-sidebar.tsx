@@ -15,6 +15,7 @@ import {
   Sparkles,
   Bot,
   Layers,
+  Users,
 } from "lucide-react";
 import {
   Sidebar,
@@ -98,6 +99,7 @@ const providerOptions: { value: ProviderFilter; label: string; icon: React.Compo
   { value: "all", label: "All", icon: Layers },
   { value: "claude", label: "Claude", icon: Sparkles },
   { value: "codex", label: "Codex", icon: Bot },
+  { value: "cowork", label: "Cowork", icon: Users },
 ];
 
 export function AppSidebar() {

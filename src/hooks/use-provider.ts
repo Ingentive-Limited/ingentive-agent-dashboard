@@ -4,7 +4,7 @@ import { createContext, useContext, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import React from "react";
 
-export type ProviderFilter = "all" | "claude" | "codex";
+export type ProviderFilter = "all" | "claude" | "codex" | "cowork";
 
 const STORAGE_KEY = "ingentive-provider";
 
@@ -12,7 +12,7 @@ function load(): ProviderFilter {
   if (typeof window === "undefined") return "all";
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    if (v === "all" || v === "claude" || v === "codex") return v;
+    if (v === "all" || v === "claude" || v === "codex" || v === "cowork") return v;
   } catch {
     // ignore
   }
@@ -24,6 +24,7 @@ interface ProviderContextValue {
   setProvider: (next: ProviderFilter) => void;
   isClaude: boolean;
   isCodex: boolean;
+  isCowork: boolean;
   isAll: boolean;
 }
 
@@ -46,6 +47,7 @@ export function ProviderProvider({ children }: { children: ReactNode }) {
     setProvider,
     isClaude: provider === "claude",
     isCodex: provider === "codex",
+    isCowork: provider === "cowork",
     isAll: provider === "all",
   };
 

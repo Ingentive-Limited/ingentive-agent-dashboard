@@ -17,6 +17,8 @@ export function cn(...inputs: ClassValue[]) {
  *   - "codex_desktop" / "desktop"    → "Desktop"
  *   - "cli" / "" / undefined         → "CLI"
  *   - anything else                  → the raw value, title-cased
+ *
+ * Cowork sessions all share entrypoint "cowork" → "Cowork".
  */
 export function formatEntrypoint(entrypoint: string | undefined | null): string {
   if (!entrypoint) return "CLI";
@@ -25,6 +27,7 @@ export function formatEntrypoint(entrypoint: string | undefined | null): string 
   if (normalized === "vscode" || normalized === "vs-code") return "VSCode";
   if (normalized === "codex_desktop" || normalized === "desktop") return "Desktop";
   if (normalized === "cli") return "CLI";
+  if (normalized === "cowork") return "Cowork";
   // Fallback: return the raw value with first letter capitalized so unknown
   // sources still render something readable.
   return entrypoint.charAt(0).toUpperCase() + entrypoint.slice(1);

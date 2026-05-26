@@ -14,7 +14,7 @@ vi.mock("next-themes", () => ({
 
 // Mock useProvider
 vi.mock("@/hooks/use-provider", () => ({
-  useProvider: vi.fn().mockReturnValue({ provider: "all", setProvider: vi.fn(), isClaude: false, isCodex: false, isAll: true }),
+  useProvider: vi.fn().mockReturnValue({ provider: "all", setProvider: vi.fn(), isClaude: false, isCodex: false, isCowork: false, isAll: true }),
   ProviderProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 import React from "react";

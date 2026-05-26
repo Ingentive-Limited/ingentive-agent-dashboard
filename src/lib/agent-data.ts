@@ -1,9 +1,10 @@
 /**
- * Provider routing layer — delegates to claude-data or codex-data
- * based on the active provider selection.
+ * Provider routing layer — delegates to claude-data, codex-data, or
+ * cowork-data based on the active provider selection.
  */
 import * as claude from "./claude-data";
 import * as codex from "./codex-data";
+import * as cowork from "./cowork-data";
 import { addTokens } from "./utils-server";
 import type {
   ClaudeSession,
@@ -20,10 +21,10 @@ import type {
   SystemStatus,
 } from "./types";
 
-export type ProviderFilter = "claude" | "codex" | "all";
+export type ProviderFilter = "claude" | "codex" | "cowork" | "all";
 
 function parseProvider(value: string | null | undefined): ProviderFilter {
-  if (value === "claude" || value === "codex") return value;
+  if (value === "claude" || value === "codex" || value === "cowork") return value;
   return "all";
 }
 
@@ -35,8 +36,13 @@ export async function getActiveSessions(provider?: ProviderFilter): Promise<Clau
   const p = provider ?? "all";
   if (p === "claude") return claude.getActiveSessions();
   if (p === "codex") return codex.getActiveSessions();
-  const [c, x] = await Promise.all([claude.getActiveSessions(), codex.getActiveSessions()]);
-  return [...c, ...x].sort((a, b) => b.startedAt - a.startedAt);
+  if (p === "cowork") return cowork.getActiveSessions();
+  const [c, x, w] = await Promise.all([
+    claude.getActiveSessions(),
+    codex.getActiveSessions(),
+    cowork.getActiveSessions(),
+  ]);
+  return [...c, ...x, ...w].sort((a, b) => b.startedAt - a.startedAt);
 }
 
 // ── Projects ─────────────────────────────────────────────────────────────────
@@ -45,8 +51,13 @@ export async function getProjects(provider?: ProviderFilter): Promise<ProjectSum
   const p = provider ?? "all";
   if (p === "claude") return claude.getProjects();
   if (p === "codex") return codex.getProjects();
-  const [c, x] = await Promise.all([claude.getProjects(), codex.getProjects()]);
-  return [...c, ...x].sort((a, b) =>
+  if (p === "cowork") return cowork.getProjects();
+  const [c, x, w] = await Promise.all([
+    claude.getProjects(),
+    codex.getProjects(),
+    cowork.getProjects(),
+  ]);
+  return [...c, ...x, ...w].sort((a, b) =>
     new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
   );
 }
@@ -58,10 +69,14 @@ export async function getProjectDetail(
   const p = provider ?? "all";
   if (p === "claude") return claude.getProjectDetail(projectId);
   if (p === "codex") return codex.getProjectDetail(projectId);
-  // Try Claude first, then Codex
+  if (p === "cowork") return cowork.getProjectDetail(projectId);
+  // Cowork uses a "cowork-" prefix so we route by ID shape first
+  if (projectId.startsWith("cowork-")) return cowork.getProjectDetail(projectId);
   const result = await claude.getProjectDetail(projectId);
   if (result) return result;
-  return codex.getProjectDetail(projectId);
+  const codexResult = await codex.getProjectDetail(projectId);
+  if (codexResult) return codexResult;
+  return cowork.getProjectDetail(projectId);
 }
 
 // ── Session History ──────────────────────────────────────────────────────────
@@ -70,8 +85,13 @@ export async function getSessionHistory(provider?: ProviderFilter): Promise<Sess
   const p = provider ?? "all";
   if (p === "claude") return claude.getSessionHistory();
   if (p === "codex") return codex.getSessionHistory();
-  const [c, x] = await Promise.all([claude.getSessionHistory(), codex.getSessionHistory()]);
-  return [...c, ...x].sort((a, b) => b.startedAt - a.startedAt);
+  if (p === "cowork") return cowork.getSessionHistory();
+  const [c, x, w] = await Promise.all([
+    claude.getSessionHistory(),
+    codex.getSessionHistory(),
+    cowork.getSessionHistory(),
+  ]);
+  return [...c, ...x, ...w].sort((a, b) => b.startedAt - a.startedAt);
 }
 
 // ── Token Usage ──────────────────────────────────────────────────────────────
@@ -83,13 +103,15 @@ export async function getDailyTokenUsage(
   const p = provider ?? "all";
   if (p === "claude") return claude.getDailyTokenUsage(days);
   if (p === "codex") return codex.getDailyTokenUsage(days);
-  const [c, x] = await Promise.all([
+  if (p === "cowork") return cowork.getDailyTokenUsage(days);
+  const [c, x, w] = await Promise.all([
     claude.getDailyTokenUsage(days),
     codex.getDailyTokenUsage(days),
+    cowork.getDailyTokenUsage(days),
   ]);
   // Merge by date
   const map = new Map<string, DailyTokenUsage>();
-  for (const entry of [...c, ...x]) {
+  for (const entry of [...c, ...x, ...w]) {
     const existing = map.get(entry.date);
     if (existing) {
       existing.input_tokens += entry.input_tokens;
@@ -109,8 +131,13 @@ export async function getProjectStats(provider?: ProviderFilter): Promise<Projec
   const p = provider ?? "all";
   if (p === "claude") return claude.getProjectStats();
   if (p === "codex") return codex.getProjectStats();
-  const [c, x] = await Promise.all([claude.getProjectStats(), codex.getProjectStats()]);
-  return [...c, ...x].sort((a, b) =>
+  if (p === "cowork") return cowork.getProjectStats();
+  const [c, x, w] = await Promise.all([
+    claude.getProjectStats(),
+    codex.getProjectStats(),
+    cowork.getProjectStats(),
+  ]);
+  return [...c, ...x, ...w].sort((a, b) =>
     new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
   );
 }
@@ -121,8 +148,13 @@ export async function searchAll(query: string, provider?: ProviderFilter): Promi
   const p = provider ?? "all";
   if (p === "claude") return claude.searchAll(query);
   if (p === "codex") return codex.searchAll(query);
-  const [c, x] = await Promise.all([claude.searchAll(query), codex.searchAll(query)]);
-  return [...c, ...x].slice(0, 20);
+  if (p === "cowork") return cowork.searchAll(query);
+  const [c, x, w] = await Promise.all([
+    claude.searchAll(query),
+    codex.searchAll(query),
+    cowork.searchAll(query),
+  ]);
+  return [...c, ...x, ...w].slice(0, 20);
 }
 
 // ── Conversation ─────────────────────────────────────────────────────────────
@@ -131,7 +163,12 @@ export function findSessionJsonl(sessionId: string, provider?: ProviderFilter): 
   const p = provider ?? "all";
   if (p === "claude") return claude.findSessionJsonl(sessionId);
   if (p === "codex") return codex.findSessionJsonl(sessionId);
-  return claude.findSessionJsonl(sessionId) || codex.findSessionJsonl(sessionId);
+  if (p === "cowork") return cowork.findSessionJsonlSync(sessionId);
+  return (
+    claude.findSessionJsonl(sessionId) ||
+    codex.findSessionJsonl(sessionId) ||
+    cowork.findSessionJsonlSync(sessionId)
+  );
 }
 
 export async function readConversationLines(
@@ -150,10 +187,13 @@ export async function getConversationPreview(
   const p = provider ?? "all";
   if (p === "claude") return claude.getConversationPreview(sessionId, maxMessages);
   if (p === "codex") return codex.getConversationPreview(sessionId, maxMessages);
-  // Try Claude first, then Codex
+  if (p === "cowork") return cowork.getConversationPreview(sessionId, maxMessages);
+  // Try Claude → Codex → Cowork
   const result = await claude.getConversationPreview(sessionId, maxMessages);
   if (result.length > 0) return result;
-  return codex.getConversationPreview(sessionId, maxMessages);
+  const codexResult = await codex.getConversationPreview(sessionId, maxMessages);
+  if (codexResult.length > 0) return codexResult;
+  return cowork.getConversationPreview(sessionId, maxMessages);
 }
 
 export async function getSessionErrors(
@@ -163,9 +203,12 @@ export async function getSessionErrors(
   const p = provider ?? "all";
   if (p === "claude") return claude.getSessionErrors(sessionId);
   if (p === "codex") return codex.getSessionErrors(sessionId);
+  if (p === "cowork") return cowork.getSessionErrors(sessionId);
   const result = await claude.getSessionErrors(sessionId);
   if (result.length > 0) return result;
-  return codex.getSessionErrors(sessionId);
+  const codexResult = await codex.getSessionErrors(sessionId);
+  if (codexResult.length > 0) return codexResult;
+  return cowork.getSessionErrors(sessionId);
 }
 
 // ── Scheduled Tasks ──────────────────────────────────────────────────────────
@@ -174,8 +217,13 @@ export async function getScheduledTasks(provider?: ProviderFilter): Promise<Sche
   const p = provider ?? "all";
   if (p === "claude") return claude.getScheduledTasks();
   if (p === "codex") return codex.getScheduledTasks();
-  const [c, x] = await Promise.all([claude.getScheduledTasks(), codex.getScheduledTasks()]);
-  return [...c, ...x];
+  if (p === "cowork") return cowork.getScheduledTasks();
+  const [c, x, w] = await Promise.all([
+    claude.getScheduledTasks(),
+    codex.getScheduledTasks(),
+    cowork.getScheduledTasks(),
+  ]);
+  return [...c, ...x, ...w];
 }
 
 // ── Plugins ──────────────────────────────────────────────────────────────────
@@ -184,8 +232,13 @@ export async function getInstalledPlugins(provider?: ProviderFilter): Promise<In
   const p = provider ?? "all";
   if (p === "claude") return claude.getInstalledPlugins();
   if (p === "codex") return codex.getInstalledPlugins();
-  const [c, x] = await Promise.all([claude.getInstalledPlugins(), codex.getInstalledPlugins()]);
-  return [...c, ...x].sort((a, b) => a.name.localeCompare(b.name));
+  if (p === "cowork") return cowork.getInstalledPlugins();
+  const [c, x, w] = await Promise.all([
+    claude.getInstalledPlugins(),
+    codex.getInstalledPlugins(),
+    cowork.getInstalledPlugins(),
+  ]);
+  return [...c, ...x, ...w].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ── Overview ─────────────────────────────────────────────────────────────────
@@ -194,26 +247,49 @@ export async function getOverview(provider?: ProviderFilter): Promise<DashboardO
   const p = provider ?? "all";
   if (p === "claude") return claude.getOverview();
   if (p === "codex") return codex.getOverview();
+  if (p === "cowork") return cowork.getOverview();
 
-  const [c, x] = await Promise.all([claude.getOverview(), codex.getOverview()]);
+  const [c, x, w] = await Promise.all([
+    claude.getOverview(),
+    codex.getOverview(),
+    cowork.getOverview(),
+  ]);
   return {
-    activeSessions: c.activeSessions + x.activeSessions,
-    awaitingInput: c.awaitingInput + x.awaitingInput,
-    totalTokensToday: addTokens(c.totalTokensToday, x.totalTokensToday),
-    totalTokensMonth: addTokens(c.totalTokensMonth, x.totalTokensMonth),
+    activeSessions: c.activeSessions + x.activeSessions + w.activeSessions,
+    awaitingInput: c.awaitingInput + x.awaitingInput + w.awaitingInput,
+    totalTokensToday: addTokens(
+      addTokens(c.totalTokensToday, x.totalTokensToday),
+      w.totalTokensToday
+    ),
+    totalTokensMonth: addTokens(
+      addTokens(c.totalTokensMonth, x.totalTokensMonth),
+      w.totalTokensMonth
+    ),
     totalCost: {
-      inputCost: c.totalCost.inputCost + x.totalCost.inputCost,
-      outputCost: c.totalCost.outputCost + x.totalCost.outputCost,
-      cacheWriteCost: c.totalCost.cacheWriteCost + x.totalCost.cacheWriteCost,
-      cacheReadCost: c.totalCost.cacheReadCost + x.totalCost.cacheReadCost,
-      totalCost: c.totalCost.totalCost + x.totalCost.totalCost,
+      inputCost:
+        c.totalCost.inputCost + x.totalCost.inputCost + w.totalCost.inputCost,
+      outputCost:
+        c.totalCost.outputCost + x.totalCost.outputCost + w.totalCost.outputCost,
+      cacheWriteCost:
+        c.totalCost.cacheWriteCost +
+        x.totalCost.cacheWriteCost +
+        w.totalCost.cacheWriteCost,
+      cacheReadCost:
+        c.totalCost.cacheReadCost +
+        x.totalCost.cacheReadCost +
+        w.totalCost.cacheReadCost,
+      totalCost: c.totalCost.totalCost + x.totalCost.totalCost + w.totalCost.totalCost,
     },
-    activeProjects: c.activeProjects + x.activeProjects,
-    scheduledTasks: c.scheduledTasks + x.scheduledTasks,
-    recentSessions: [...c.recentSessions, ...x.recentSessions]
+    activeProjects: c.activeProjects + x.activeProjects + w.activeProjects,
+    scheduledTasks: c.scheduledTasks + x.scheduledTasks + w.scheduledTasks,
+    recentSessions: [...c.recentSessions, ...x.recentSessions, ...w.recentSessions]
       .sort((a, b) => b.startedAt - a.startedAt)
       .slice(0, 5),
-    tokenTimeSeries: [...c.tokenTimeSeries, ...x.tokenTimeSeries].sort(
+    tokenTimeSeries: [
+      ...c.tokenTimeSeries,
+      ...x.tokenTimeSeries,
+      ...w.tokenTimeSeries,
+    ].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     ),
   };
@@ -225,20 +301,25 @@ export async function getSystemStatus(provider?: ProviderFilter): Promise<System
   const p = provider ?? "all";
   if (p === "claude") return claude.getSystemStatus();
   if (p === "codex") return codex.getSystemStatus();
+  if (p === "cowork") return cowork.getSystemStatus();
 
-  // Merge both providers
-  const [c, x, claudeSessions, codexSessions] = await Promise.all([
+  // Merge all three providers
+  const [c, x, w, claudeSessions, codexSessions, coworkSessions] = await Promise.all([
     claude.getClaudeProviderStatus(),
     codex.getCodexProviderStatus(),
+    cowork.getCoworkProviderStatus(),
     claude.getActiveSessions(),
     codex.getActiveSessions(),
+    cowork.getActiveSessions(),
   ]);
 
   return {
     claude: c,
     codex: x,
+    cowork: w,
     activeSessions:
       claudeSessions.filter((s) => s.isAlive).length +
-      codexSessions.filter((s) => s.isAlive).length,
+      codexSessions.filter((s) => s.isAlive).length +
+      coworkSessions.filter((s) => s.isAlive).length,
   };
 }

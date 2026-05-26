@@ -78,15 +78,15 @@ export async function GET(
     );
   }
 
-  // Codex sessions use a completely different JSONL format than Claude
-  // (event_msg/response_item vs human/assistant). Delegate to the Codex-specific
-  // parser in getConversationPreview, then translate to this route's shape so
-  // the existing ConversationViewer component can render it without changes.
-  if (provider === "codex") {
+  // Codex and Cowork sessions use different JSONL formats than Claude Code's
+  // projects/*.jsonl. Delegate to each provider's getConversationPreview and
+  // translate to this route's shape so the existing ConversationViewer
+  // component can render them without changes.
+  if (provider === "codex" || provider === "cowork") {
     try {
-      const previews = await getConversationPreview(id, MAX_MESSAGES, "codex");
+      const previews = await getConversationPreview(id, MAX_MESSAGES, provider);
       const messages = previews.map((m) => ({
-        // Map Codex role → this route's entry.type
+        // Map normalized role → this route's entry.type
         type: m.role === "user" ? "human" : "assistant",
         content: [{ type: "text", text: m.text }],
         timestamp: m.timestamp,
