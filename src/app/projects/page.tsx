@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatRelativeTime, formatTokens, formatCost } from "@/lib/utils";
-import type { ProjectStats } from "@/lib/types";
+import type { ProjectStats, Provider } from "@/lib/types";
 import Link from "next/link";
 import {
   FolderOpen,
@@ -29,6 +29,29 @@ import { EmptyState } from "@/components/empty-state";
 
 type SortKey = "name" | "activity" | "tokens" | "cost" | "sessions" | "errors";
 type GroupMode = "none" | "directory";
+
+/**
+ * Title-case the provider tag for display, mirroring the entrypoint badge
+ * style used on the sessions page. Cowork rows are visually distinct because
+ * they're the ones whose cache-read totals dominate sort-by-tokens order.
+ */
+function formatProviderLabel(provider: Provider | undefined): string {
+  if (!provider) return "";
+  if (provider === "claude") return "Claude";
+  if (provider === "codex") return "Codex";
+  if (provider === "cowork") return "Cowork";
+  return "";
+}
+
+function ProviderBadge({ provider }: { provider: Provider | undefined }) {
+  const label = formatProviderLabel(provider);
+  if (!label) return null;
+  return (
+    <Badge variant="outline" className="text-[10px]">
+      {label}
+    </Badge>
+  );
+}
 
 function ErrorRateBadge({ errorRate, errorCount, successCount }: { errorRate: number; errorCount: number; successCount: number }) {
   if (errorCount + successCount === 0) return null;
@@ -101,6 +124,7 @@ function ProjectCard({
             <CardTitle className="text-base truncate">{project.name}</CardTitle>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <ProviderBadge provider={project.provider} />
             <ErrorRateBadge
               errorRate={project.errorRate}
               errorCount={project.errorCount}

@@ -41,12 +41,18 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
   const emptyColor = isDark ? "#1a1a2e" : "#ebedf0";
 
   const { grid, maxVal, months } = useMemo(() => {
+    // The daily-usage feed now returns one row per (date, provider) since
+    // agent-data stopped sum-merging across providers. Aggregate here so the
+    // heatmap shows the total per day regardless of which provider produced
+    // it.
     const dateMap = new Map<string, number>();
-    let max = 0;
     for (const d of data) {
       const total = d.input_tokens + d.output_tokens;
-      dateMap.set(d.date, total);
-      if (total > max) max = total;
+      dateMap.set(d.date, (dateMap.get(d.date) ?? 0) + total);
+    }
+    let max = 0;
+    for (const v of dateMap.values()) {
+      if (v > max) max = v;
     }
 
     const today = new Date();

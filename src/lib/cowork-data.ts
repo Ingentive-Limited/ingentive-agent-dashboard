@@ -49,17 +49,18 @@ import {
   isWithinDir,
   formatLocalDate,
 } from "./utils-server";
+import { pricingForModel } from "./pricing";
 
-// Cowork runs on Anthropic models — use the same Sonnet 4 pricing as Claude.
-const COWORK_PRICING = {
-  input: 3.0 / 1_000_000,
-  output: 15.0 / 1_000_000,
-  cacheWrite: 3.75 / 1_000_000,
-  cacheRead: 0.30 / 1_000_000,
-};
-
-function calculateCoworkCost(tokens: TokenUsage): CostEstimate {
-  return calculateCost(tokens, COWORK_PRICING);
+/**
+ * Compute cost for a Cowork session using the model-aware pricing table.
+ * Cowork runs on Anthropic models; unknown/missing models fall back to
+ * Sonnet 4 rates (matching the previous hardcoded behaviour).
+ */
+function calculateCoworkCost(
+  tokens: TokenUsage,
+  model?: string | null
+): CostEstimate {
+  return calculateCost(tokens, pricingForModel(model, "cowork"));
 }
 
 const IS_WIN = process.platform === "win32";
@@ -478,6 +479,27 @@ export async function getProjects(): Promise<ProjectSummary[]> {
       sortedItems[0]?.manifest.title?.trim() ||
       `Cowork workspace ${workspaceId.slice(0, 8)}`;
 
+    // For a workspace summary we sum per-session costs so each session is
+    // priced at its own model's rate. Tokens still aggregate for the totals
+    // display.
+    let workspaceCost: CostEstimate = {
+      inputCost: 0,
+      outputCost: 0,
+      cacheWriteCost: 0,
+      cacheReadCost: 0,
+      totalCost: 0,
+    };
+    for (let i = 0; i < items.length; i++) {
+      const c = calculateCoworkCost(tokensPerItem[i], items[i].manifest.model);
+      workspaceCost = {
+        inputCost: workspaceCost.inputCost + c.inputCost,
+        outputCost: workspaceCost.outputCost + c.outputCost,
+        cacheWriteCost: workspaceCost.cacheWriteCost + c.cacheWriteCost,
+        cacheReadCost: workspaceCost.cacheReadCost + c.cacheReadCost,
+        totalCost: workspaceCost.totalCost + c.totalCost,
+      };
+    }
+
     summaries.push({
       id: `cowork-${workspaceId}`,
       path: workspaceId,
@@ -485,7 +507,8 @@ export async function getProjects(): Promise<ProjectSummary[]> {
       sessionCount: items.length,
       lastActivity: new Date(lastActivity || Date.now()).toISOString(),
       totalTokens,
-      cost: calculateCoworkCost(totalTokens),
+      cost: workspaceCost,
+      provider: "cowork",
     });
   }
 
@@ -511,6 +534,13 @@ export async function getProjectDetail(
   let cumulativeInput = 0;
   let cumulativeOutput = 0;
   let lastActivity = 0;
+  let projectCost: CostEstimate = {
+    inputCost: 0,
+    outputCost: 0,
+    cacheWriteCost: 0,
+    cacheReadCost: 0,
+    totalCost: 0,
+  };
 
   const sorted = [...items].sort(
     (a, b) => (a.manifest.createdAt ?? 0) - (b.manifest.createdAt ?? 0)
@@ -527,6 +557,14 @@ export async function getProjectDetail(
     totalTokens = addTokens(totalTokens, tokens);
     cumulativeInput += tokens.input_tokens;
     cumulativeOutput += tokens.output_tokens;
+    const sessionCost = calculateCoworkCost(tokens, item.manifest.model);
+    projectCost = {
+      inputCost: projectCost.inputCost + sessionCost.inputCost,
+      outputCost: projectCost.outputCost + sessionCost.outputCost,
+      cacheWriteCost: projectCost.cacheWriteCost + sessionCost.cacheWriteCost,
+      cacheReadCost: projectCost.cacheReadCost + sessionCost.cacheReadCost,
+      totalCost: projectCost.totalCost + sessionCost.totalCost,
+    };
 
     const created = item.manifest.createdAt ?? 0;
     const updated = item.manifest.lastActivityAt ?? created;
@@ -545,6 +583,7 @@ export async function getProjectDetail(
       ...tokens,
       cumulative_input: cumulativeInput,
       cumulative_output: cumulativeOutput,
+      provider: "cowork",
     });
   }
 
@@ -557,7 +596,7 @@ export async function getProjectDetail(
     sessionCount: items.length,
     lastActivity: new Date(lastActivity || Date.now()).toISOString(),
     totalTokens,
-    cost: calculateCoworkCost(totalTokens),
+    cost: projectCost,
     sessions,
     subagents: [],
     memoryFiles: [],
@@ -594,7 +633,7 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
         : undefined,
       entrypoint: "cowork",
       totalTokens: tokens,
-      cost: calculateCoworkCost(tokens),
+      cost: calculateCoworkCost(tokens, m.model),
       messageCount: 0,
       status,
       provider: "cowork" as const,
@@ -610,8 +649,10 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
   const manifests = await discoverManifests();
   if (manifests.length === 0) return fillEmptyDays(days);
 
-  // Aggregate tokens by calendar day of session creation.
+  // Aggregate tokens by calendar day of session creation, and accumulate cost
+  // per-session so each contribution is priced at its own model's rate.
   const byDay = new Map<string, TokenUsage>();
+  const costByDay = new Map<string, number>();
   const sessionsByDay = new Map<string, number>();
 
   // Only sessions created within the requested window can contribute to the
@@ -634,6 +675,8 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
     const dateStr = formatLocalDate(new Date(created));
     const tokens = tokensPerItem[i];
     byDay.set(dateStr, addTokens(byDay.get(dateStr) ?? emptyTokenUsage(), tokens));
+    const sessionCost = calculateCoworkCost(tokens, relevant[i].manifest.model).totalCost;
+    costByDay.set(dateStr, (costByDay.get(dateStr) ?? 0) + sessionCost);
     sessionsByDay.set(dateStr, (sessionsByDay.get(dateStr) ?? 0) + 1);
   }
 
@@ -647,8 +690,9 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
     result.push({
       date: dateStr,
       ...tokens,
-      totalCost: calculateCoworkCost(tokens).totalCost,
+      totalCost: costByDay.get(dateStr) ?? 0,
       sessionCount: sessionsByDay.get(dateStr) ?? 0,
+      provider: "cowork",
     });
   }
   return result;
@@ -668,6 +712,7 @@ function fillEmptyDays(days: number): DailyTokenUsage[] {
       cache_read_input_tokens: 0,
       totalCost: 0,
       sessionCount: 0,
+      provider: "cowork",
     });
   }
   return result;
@@ -685,6 +730,7 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
     errorCount: 0,
     successCount: p.sessionCount,
     errorRate: 0,
+    provider: "cowork" as const,
   }));
 }
 
@@ -919,6 +965,9 @@ export async function getOverview(): Promise<DashboardOverview> {
 
   let totalTokensToday = emptyTokenUsage();
   let totalTokensMonth = emptyTokenUsage();
+  // Cost sums up the (already model-aware) per-day cost from getDailyTokenUsage
+  // rather than re-pricing aggregated tokens with a single model's rates.
+  let monthCostTotal = 0;
 
   const daily = await getDailyTokenUsage(30);
   const todayStr = formatLocalDate(new Date());
@@ -938,6 +987,7 @@ export async function getOverview(): Promise<DashboardOverview> {
     }
     if (day.date >= monthStartStr) {
       totalTokensMonth = addTokens(totalTokensMonth, dayTokens);
+      monthCostTotal += day.totalCost;
     }
   }
 
@@ -962,7 +1012,15 @@ export async function getOverview(): Promise<DashboardOverview> {
     awaitingInput,
     totalTokensToday,
     totalTokensMonth,
-    totalCost: calculateCoworkCost(totalTokensMonth),
+    totalCost: {
+      // We have a model-aware total from per-day aggregation; component
+      // breakdown isn't needed at the dashboard tile.
+      inputCost: 0,
+      outputCost: 0,
+      cacheWriteCost: 0,
+      cacheReadCost: 0,
+      totalCost: monthCostTotal,
+    },
     activeProjects: activeProjectCount,
     scheduledTasks: 0,
     recentSessions: aliveSessions.slice(0, 5),

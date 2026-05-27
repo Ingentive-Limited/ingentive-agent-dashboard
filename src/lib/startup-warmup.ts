@@ -63,12 +63,10 @@ export function startBackgroundWarmup(): void {
         const ms = Date.now() - start;
         const failed = results.filter((r) => r.status === "rejected").length;
         if (failed > 0) {
-          // eslint-disable-next-line no-console
           console.warn(
             `[warmup] completed in ${ms}ms with ${failed} provider(s) erroring (caches partially populated)`
           );
         } else {
-          // eslint-disable-next-line no-console
           console.log(`[warmup] cache populated in ${ms}ms`);
         }
       })

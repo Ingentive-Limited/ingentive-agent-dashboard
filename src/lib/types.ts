@@ -43,6 +43,8 @@ export interface TokenDataPoint {
   cache_read_input_tokens: number;
   cumulative_input: number;
   cumulative_output: number;
+  /** Origin provider — optional for back-compat. */
+  provider?: Provider;
 }
 
 export interface CostEstimate {
@@ -61,6 +63,13 @@ export interface ProjectSummary {
   lastActivity: string;
   totalTokens: TokenUsage;
   cost: CostEstimate;
+  /**
+   * Origin of this row. Optional for backwards compatibility — rows produced
+   * before the per-provider tagging change may omit it. Set by each provider
+   * module (claude-data / codex-data / cowork-data) so the UI can split
+   * Cowork's large cache-read totals out of Claude Code charts.
+   */
+  provider?: Provider;
 }
 
 export interface ProjectDetail extends ProjectSummary {
@@ -132,6 +141,14 @@ export interface DailyTokenUsage {
   cache_read_input_tokens: number;
   totalCost: number;
   sessionCount: number;
+  /**
+   * Origin provider for this day-row. Optional for back-compat. When the
+   * agent-data layer fans out across providers it returns one row per
+   * (date, provider) pair instead of summing across providers — Cowork's
+   * cache_read totals are huge enough to make a combined chart unreadable,
+   * so the UI splits the series.
+   */
+  provider?: Provider;
 }
 
 export interface ProjectStats {
@@ -144,6 +161,8 @@ export interface ProjectStats {
   errorCount: number;
   successCount: number;
   errorRate: number;
+  /** Origin provider — optional for back-compat. */
+  provider?: Provider;
 }
 
 export interface InstalledPlugin {

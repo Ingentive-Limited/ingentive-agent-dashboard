@@ -127,24 +127,18 @@ export async function getSessionHistory(provider?: ProviderFilter): Promise<Sess
 
 // ── Token Usage ──────────────────────────────────────────────────────────────
 
-function mergeDailyUsage(...lists: DailyTokenUsage[][]): DailyTokenUsage[] {
-  const map = new Map<string, DailyTokenUsage>();
-  for (const list of lists) {
-    for (const entry of list) {
-      const existing = map.get(entry.date);
-      if (existing) {
-        existing.input_tokens += entry.input_tokens;
-        existing.output_tokens += entry.output_tokens;
-        existing.cache_creation_input_tokens += entry.cache_creation_input_tokens;
-        existing.cache_read_input_tokens += entry.cache_read_input_tokens;
-        existing.totalCost += entry.totalCost;
-        existing.sessionCount += entry.sessionCount;
-      } else {
-        map.set(entry.date, { ...entry });
-      }
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+/**
+ * Concatenate per-provider daily-usage lists WITHOUT summing across
+ * providers — every row carries its `provider` tag so the UI can split or
+ * aggregate as it sees fit. Cowork sessions can have gigabytes of
+ * `cache_read_input_tokens`, which used to drown out Claude Code numbers
+ * when we merged per-date; preserving the split lets the UI render Cowork
+ * separately. Rows are sorted by date for downstream chart compatibility.
+ */
+function concatDailyUsage(...lists: DailyTokenUsage[][]): DailyTokenUsage[] {
+  const out: DailyTokenUsage[] = [];
+  for (const list of lists) out.push(...list);
+  return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export async function getDailyTokenUsage(
@@ -158,14 +152,14 @@ export async function getDailyTokenUsage(
       claude.getDailyTokenUsage(days),
       cowork.getDailyTokenUsage(days),
     ]);
-    return mergeDailyUsage(c, w);
+    return concatDailyUsage(c, w);
   }
   const [c, x, w] = await Promise.all([
     claude.getDailyTokenUsage(days),
     codex.getDailyTokenUsage(days),
     cowork.getDailyTokenUsage(days),
   ]);
-  return mergeDailyUsage(c, x, w);
+  return concatDailyUsage(c, x, w);
 }
 
 export async function getProjectStats(provider?: ProviderFilter): Promise<ProjectStats[]> {

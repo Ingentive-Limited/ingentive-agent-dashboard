@@ -1,0 +1,106 @@
+import { describe, it, expect } from "vitest";
+import {
+  pricingForModel,
+  ANTHROPIC_PRICING,
+  OPENAI_PRICING,
+} from "@/lib/pricing";
+
+/**
+ * The published constants are in USD/1M tokens; `pricingForModel` divides by
+ * 1M so callers can multiply by raw token counts. These tests assert exact
+ * matches, prefix-fallback behaviour, and provider defaults.
+ */
+
+describe("pricingForModel", () => {
+  it("matches an exact Anthropic model id", () => {
+    const p = pricingForModel("claude-opus-4", "claude");
+    expect(p.input).toBeCloseTo(15 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(75 / 1_000_000, 12);
+    expect(p.cacheWrite).toBeCloseTo(18.75 / 1_000_000, 12);
+    expect(p.cacheRead).toBeCloseTo(1.5 / 1_000_000, 12);
+  });
+
+  it("matches a prefix for unknown Anthropic Sonnet variants", () => {
+    const p = pricingForModel("claude-sonnet-4-8", "claude");
+    // Falls back to Sonnet 4 rates by prefix
+    expect(p.input).toBeCloseTo(3 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(15 / 1_000_000, 12);
+  });
+
+  it("matches a prefix for unknown Anthropic Opus variants", () => {
+    const p = pricingForModel("claude-opus-4-7", "claude");
+    expect(p.input).toBeCloseTo(15 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(75 / 1_000_000, 12);
+  });
+
+  it("matches an exact Anthropic Haiku model", () => {
+    const p = pricingForModel("claude-haiku-4", "claude");
+    expect(p.input).toBeCloseTo(0.8 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(4 / 1_000_000, 12);
+  });
+
+  it("falls back to Sonnet 4 when the Anthropic model is unknown", () => {
+    const p = pricingForModel("totally-unknown-model", "claude");
+    expect(p.input).toBeCloseTo(3 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(15 / 1_000_000, 12);
+  });
+
+  it("falls back to Sonnet 4 when the model is null/undefined for claude", () => {
+    const a = pricingForModel(null, "claude");
+    const b = pricingForModel(undefined, "claude");
+    const c = pricingForModel("", "claude");
+    for (const p of [a, b, c]) {
+      expect(p.input).toBeCloseTo(3 / 1_000_000, 12);
+      expect(p.output).toBeCloseTo(15 / 1_000_000, 12);
+    }
+  });
+
+  it("uses Sonnet 4 fallback for the cowork provider as well", () => {
+    const p = pricingForModel(null, "cowork");
+    expect(p.input).toBeCloseTo(3 / 1_000_000, 12);
+  });
+
+  it("matches an exact OpenAI Codex model", () => {
+    const p = pricingForModel("gpt-5.3-codex", "codex");
+    expect(p.input).toBeCloseTo(2 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(8 / 1_000_000, 12);
+    expect(p.reasoning).toBeCloseTo(8 / 1_000_000, 12);
+  });
+
+  it("matches an exact OpenAI gpt-5.4-mini model with much cheaper rates", () => {
+    const p = pricingForModel("gpt-5.4-mini", "codex");
+    expect(p.input).toBeCloseTo(0.25 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(1 / 1_000_000, 12);
+    expect(p.reasoning).toBeCloseTo(1 / 1_000_000, 12);
+  });
+
+  it("matches gpt-5.4 separately from gpt-5.4-mini", () => {
+    const p = pricingForModel("gpt-5.4", "codex");
+    expect(p.input).toBeCloseTo(2.5 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(10 / 1_000_000, 12);
+  });
+
+  it("disambiguates gpt-5.4-mini from gpt-5.4 via prefix order", () => {
+    // Hypothetical "gpt-5.4-mini-preview" — must still pick the mini bucket.
+    const p = pricingForModel("gpt-5.4-mini-preview", "codex");
+    expect(p.input).toBeCloseTo(0.25 / 1_000_000, 12);
+  });
+
+  it("falls back to gpt-5.3-codex when the Codex model is unknown", () => {
+    const p = pricingForModel("some-future-codex", "codex");
+    expect(p.input).toBeCloseTo(2 / 1_000_000, 12);
+    expect(p.reasoning).toBeCloseTo(8 / 1_000_000, 12);
+  });
+
+  it("falls back to gpt-5.3-codex when the codex model is null", () => {
+    const p = pricingForModel(null, "codex");
+    expect(p.input).toBeCloseTo(2 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(8 / 1_000_000, 12);
+  });
+
+  it("publishes anthropic and openai pricing tables", () => {
+    expect(ANTHROPIC_PRICING["claude-opus-4"].output).toBe(75);
+    expect(ANTHROPIC_PRICING["claude-sonnet-4"].output).toBe(15);
+    expect(OPENAI_PRICING["gpt-5.4-mini"].output).toBe(1);
+  });
+});

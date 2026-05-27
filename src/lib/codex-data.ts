@@ -33,20 +33,21 @@ import {
   isWithinDir,
   formatLocalDate,
 } from "./utils-server";
+import { pricingForModel } from "./pricing";
 
-// OpenAI pricing per million tokens (GPT-5.3-codex as default)
-const CODEX_PRICING = {
-  input: 2.0 / 1_000_000,
-  output: 8.0 / 1_000_000,
-  cacheWrite: 0,
-  cacheRead: 0,
-  reasoning: 8.0 / 1_000_000,
-};
-
-function calculateCodexCost(tokens: TokenUsage): CostEstimate {
-  const base = calculateCost(tokens, CODEX_PRICING);
-  // Add reasoning token cost if present
-  const reasoningCost = (tokens.reasoning_tokens || 0) * (CODEX_PRICING.reasoning || 0);
+/**
+ * Compute cost for a Codex thread using the model-aware pricing table.
+ * Defaults to gpt-5.3-codex rates when the model isn't known or the thread is
+ * an older NULL-model archive row.
+ */
+function calculateCodexCost(
+  tokens: TokenUsage,
+  model?: string | null
+): CostEstimate {
+  const pricing = pricingForModel(model, "codex");
+  const base = calculateCost(tokens, pricing);
+  const reasoningCost =
+    (tokens.reasoning_tokens || 0) * (pricing.reasoning || 0);
   return {
     ...base,
     totalCost: base.totalCost + reasoningCost,
@@ -357,38 +358,68 @@ export async function getActiveSessions(): Promise<ClaudeSession[]> {
 export async function getProjects(): Promise<ProjectSummary[]> {
   const db = openDb();
   if (!db) return [];
+  // Group by (cwd, model) so we can sum per-model cost correctly without
+  // losing the model dimension to a top-level SUM.
   const rows = db.prepare(`
     SELECT cwd,
+           model,
            COUNT(*) as session_count,
            MAX(updated_at) as last_activity,
            SUM(tokens_used) as total_tokens
     FROM threads
-    GROUP BY cwd
-    ORDER BY last_activity DESC
+    GROUP BY cwd, model
+    ORDER BY cwd, last_activity DESC
   `).all() as Array<{
     cwd: string;
+    model: string | null;
     session_count: number;
     last_activity: number;
     total_tokens: number;
   }>;
 
-  return rows.map((row) => {
-    const totalTokens: TokenUsage = {
+  // Fold per-(cwd,model) buckets into per-cwd summaries, pricing each bucket
+  // with its own model's rates.
+  const byCwd = new Map<string, ProjectSummary>();
+  for (const row of rows) {
+    const tokens: TokenUsage = {
       input_tokens: Math.round((row.total_tokens || 0) * 0.3),
       output_tokens: Math.round((row.total_tokens || 0) * 0.7),
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,
     };
-    return {
-      id: row.cwd.replace(/[\\/]/g, "-"),
-      path: row.cwd,
-      name: projectNameFromPath(row.cwd),
-      sessionCount: row.session_count,
-      lastActivity: new Date(row.last_activity * 1000).toISOString(),
-      totalTokens,
-      cost: calculateCodexCost(totalTokens),
-    };
-  });
+    const bucketCost = calculateCodexCost(tokens, row.model);
+    const existing = byCwd.get(row.cwd);
+    if (existing) {
+      existing.sessionCount += row.session_count;
+      existing.totalTokens = addTokens(existing.totalTokens, tokens);
+      if (row.last_activity * 1000 > new Date(existing.lastActivity).getTime()) {
+        existing.lastActivity = new Date(row.last_activity * 1000).toISOString();
+      }
+      existing.cost = {
+        inputCost: existing.cost.inputCost + bucketCost.inputCost,
+        outputCost: existing.cost.outputCost + bucketCost.outputCost,
+        cacheWriteCost: existing.cost.cacheWriteCost + bucketCost.cacheWriteCost,
+        cacheReadCost: existing.cost.cacheReadCost + bucketCost.cacheReadCost,
+        totalCost: existing.cost.totalCost + bucketCost.totalCost,
+      };
+    } else {
+      byCwd.set(row.cwd, {
+        id: row.cwd.replace(/[\\/]/g, "-"),
+        path: row.cwd,
+        name: projectNameFromPath(row.cwd),
+        sessionCount: row.session_count,
+        lastActivity: new Date(row.last_activity * 1000).toISOString(),
+        totalTokens: tokens,
+        cost: bucketCost,
+        provider: "codex" as const,
+      });
+    }
+  }
+
+  return Array.from(byCwd.values()).sort(
+    (a, b) =>
+      new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+  );
 }
 
 export async function getProjectDetail(projectId: string): Promise<ProjectDetail | null> {
@@ -408,12 +439,27 @@ export async function getProjectDetail(projectId: string): Promise<ProjectDetail
   const tokenTimeSeries: TokenDataPoint[] = [];
   let cumulativeInput = 0;
   let cumulativeOutput = 0;
+  let projectCost: CostEstimate = {
+    inputCost: 0,
+    outputCost: 0,
+    cacheWriteCost: 0,
+    cacheReadCost: 0,
+    totalCost: 0,
+  };
 
   for (const row of rows) {
     const tokens = tokensFromRow(row);
     totalTokens = addTokens(totalTokens, tokens);
     cumulativeInput += tokens.input_tokens;
     cumulativeOutput += tokens.output_tokens;
+    const c = calculateCodexCost(tokens, row.model);
+    projectCost = {
+      inputCost: projectCost.inputCost + c.inputCost,
+      outputCost: projectCost.outputCost + c.outputCost,
+      cacheWriteCost: projectCost.cacheWriteCost + c.cacheWriteCost,
+      cacheReadCost: projectCost.cacheReadCost + c.cacheReadCost,
+      totalCost: projectCost.totalCost + c.totalCost,
+    };
 
     sessions.push({
       sessionId: row.id,
@@ -428,6 +474,7 @@ export async function getProjectDetail(projectId: string): Promise<ProjectDetail
       ...tokens,
       cumulative_input: cumulativeInput,
       cumulative_output: cumulativeOutput,
+      provider: "codex",
     });
   }
 
@@ -458,7 +505,7 @@ export async function getProjectDetail(projectId: string): Promise<ProjectDetail
     sessionCount: rows.length,
     lastActivity: new Date(lastActivity * 1000).toISOString(),
     totalTokens,
-    cost: calculateCodexCost(totalTokens),
+    cost: projectCost,
     sessions,
     subagents,
     memoryFiles: [],
@@ -485,7 +532,7 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
       endedAt: row.archived ? new Date(row.updated_at * 1000).toISOString() : undefined,
       entrypoint: row.source || "cli",
       totalTokens: tokens,
-      cost: calculateCodexCost(tokens),
+      cost: calculateCodexCost(tokens, row.model),
       messageCount: 0,
       status: row.archived
         ? ("dead" as SessionStatus)
@@ -501,15 +548,45 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
   const db = openDb();
   if (!db) return [];
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+  // Bucket by (day, model) so each model contribution is priced correctly
+  // before being collapsed into per-day totals.
   const rows = db.prepare(`
     SELECT date(created_at, 'unixepoch', 'localtime') as day,
+           model,
            SUM(tokens_used) as total,
            COUNT(*) as sessions
     FROM threads
     WHERE created_at >= ?
-    GROUP BY day
+    GROUP BY day, model
     ORDER BY day ASC
-  `).all(cutoff) as Array<{ day: string; total: number; sessions: number }>;
+  `).all(cutoff) as Array<{
+    day: string;
+    model: string | null;
+    total: number;
+    sessions: number;
+  }>;
+
+  // Aggregate per-day: tokens sum, cost is the sum of per-model bucket costs.
+  type DayAgg = { tokens: TokenUsage; totalCost: number; sessions: number };
+  const byDay = new Map<string, DayAgg>();
+  for (const row of rows) {
+    const total = row.total || 0;
+    const tokens: TokenUsage = {
+      input_tokens: Math.round(total * 0.3),
+      output_tokens: Math.round(total * 0.7),
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    };
+    const cost = calculateCodexCost(tokens, row.model).totalCost;
+    const existing = byDay.get(row.day);
+    if (existing) {
+      existing.tokens = addTokens(existing.tokens, tokens);
+      existing.totalCost += cost;
+      existing.sessions += row.sessions;
+    } else {
+      byDay.set(row.day, { tokens, totalCost: cost, sessions: row.sessions });
+    }
+  }
 
   // Fill missing days
   const result: DailyTokenUsage[] = [];
@@ -518,20 +595,27 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
     const d = new Date(now);
     d.setDate(d.getDate() - i);
     const dateStr = formatLocalDate(d);
-    const match = rows.find((r) => r.day === dateStr);
-    const total = match?.total || 0;
-    const tokens: TokenUsage = {
-      input_tokens: Math.round(total * 0.3),
-      output_tokens: Math.round(total * 0.7),
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-    };
-    result.push({
-      date: dateStr,
-      ...tokens,
-      totalCost: calculateCodexCost(tokens).totalCost,
-      sessionCount: match?.sessions || 0,
-    });
+    const match = byDay.get(dateStr);
+    if (match) {
+      result.push({
+        date: dateStr,
+        ...match.tokens,
+        totalCost: match.totalCost,
+        sessionCount: match.sessions,
+        provider: "codex",
+      });
+    } else {
+      result.push({
+        date: dateStr,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        totalCost: 0,
+        sessionCount: 0,
+        provider: "codex",
+      });
+    }
   }
   return result;
 }
@@ -539,40 +623,66 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
 export async function getProjectStats(): Promise<ProjectStats[]> {
   const db = openDb();
   if (!db) return [];
+  // Per-(cwd,model) breakdown lets us price each bucket at its own rate.
   const rows = db.prepare(`
     SELECT cwd,
+           model,
            COUNT(*) as session_count,
            MAX(updated_at) as last_activity,
            SUM(tokens_used) as total_tokens
     FROM threads
-    GROUP BY cwd
+    GROUP BY cwd, model
     ORDER BY total_tokens DESC
   `).all() as Array<{
     cwd: string;
+    model: string | null;
     session_count: number;
     last_activity: number;
     total_tokens: number;
   }>;
 
-  return rows.map((row) => {
+  const byCwd = new Map<string, ProjectStats>();
+  for (const row of rows) {
     const tokens: TokenUsage = {
       input_tokens: Math.round((row.total_tokens || 0) * 0.3),
       output_tokens: Math.round((row.total_tokens || 0) * 0.7),
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,
     };
-    return {
-      id: row.cwd.replace(/[\\/]/g, "-"),
-      name: projectNameFromPath(row.cwd),
-      totalTokens: tokens,
-      cost: calculateCodexCost(tokens),
-      sessionCount: row.session_count,
-      lastActivity: new Date(row.last_activity * 1000).toISOString(),
-      errorCount: 0,
-      successCount: row.session_count,
-      errorRate: 0,
-    };
-  });
+    const bucketCost = calculateCodexCost(tokens, row.model);
+    const existing = byCwd.get(row.cwd);
+    if (existing) {
+      existing.totalTokens = addTokens(existing.totalTokens, tokens);
+      existing.sessionCount += row.session_count;
+      existing.successCount += row.session_count;
+      existing.cost = {
+        inputCost: existing.cost.inputCost + bucketCost.inputCost,
+        outputCost: existing.cost.outputCost + bucketCost.outputCost,
+        cacheWriteCost: existing.cost.cacheWriteCost + bucketCost.cacheWriteCost,
+        cacheReadCost: existing.cost.cacheReadCost + bucketCost.cacheReadCost,
+        totalCost: existing.cost.totalCost + bucketCost.totalCost,
+      };
+      if (row.last_activity * 1000 > new Date(existing.lastActivity).getTime()) {
+        existing.lastActivity = new Date(row.last_activity * 1000).toISOString();
+      }
+    } else {
+      byCwd.set(row.cwd, {
+        id: row.cwd.replace(/[\\/]/g, "-"),
+        name: projectNameFromPath(row.cwd),
+        totalTokens: tokens,
+        cost: bucketCost,
+        sessionCount: row.session_count,
+        lastActivity: new Date(row.last_activity * 1000).toISOString(),
+        errorCount: 0,
+        successCount: row.session_count,
+        errorRate: 0,
+        provider: "codex" as const,
+      });
+    }
+  }
+  return Array.from(byCwd.values()).sort(
+    (a, b) => b.cost.totalCost - a.cost.totalCost
+  );
 }
 
 // ── Search ───────────────────────────────────────────────────────────────────
@@ -817,6 +927,9 @@ export async function getOverview(): Promise<DashboardOverview> {
 
   let totalTokensToday = emptyTokenUsage();
   let totalTokensMonth = emptyTokenUsage();
+  // Cost sums up the (already model-aware) per-day cost from getDailyTokenUsage
+  // so a month spanning multiple models is priced correctly.
+  let monthCostTotal = 0;
 
   // Aggregate from daily token data
   const dailyData = await getDailyTokenUsage(30);
@@ -837,6 +950,7 @@ export async function getOverview(): Promise<DashboardOverview> {
     }
     if (day.date >= monthStartStr) {
       totalTokensMonth = addTokens(totalTokensMonth, dayTokens);
+      monthCostTotal += day.totalCost;
     }
   }
 
@@ -860,7 +974,13 @@ export async function getOverview(): Promise<DashboardOverview> {
     awaitingInput,
     totalTokensToday,
     totalTokensMonth,
-    totalCost: calculateCodexCost(totalTokensMonth),
+    totalCost: {
+      inputCost: 0,
+      outputCost: 0,
+      cacheWriteCost: 0,
+      cacheReadCost: 0,
+      totalCost: monthCostTotal,
+    },
     activeProjects: activeProjectCount,
     scheduledTasks: tasks.length,
     recentSessions: aliveSessions.slice(0, 5),

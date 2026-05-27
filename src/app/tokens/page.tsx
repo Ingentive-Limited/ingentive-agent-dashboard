@@ -156,11 +156,20 @@ export default function TokensPage() {
     return { totalInput: input, totalOutput: output, totalCache: cache, totalCost: cost, trend: trendPct };
   }, [dailyData]);
 
-  // Project bar chart data
-  const chartData = useMemo(() => {
+  // Project bar chart data. We split Cowork into its own series because its
+  // cache_read_input_tokens are several orders of magnitude larger than
+  // anything Claude Code produces — sharing a y-axis makes Claude bars
+  // disappear.
+  const projectsForChart = useMemo(() => {
     if (!projects) return [];
-    return projects
-      .filter((p) => p.totalTokens.input_tokens + p.totalTokens.output_tokens > 0)
+    return projects.filter(
+      (p) => p.totalTokens.input_tokens + p.totalTokens.output_tokens > 0
+    );
+  }, [projects]);
+
+  const claudeChartData = useMemo(() => {
+    return projectsForChart
+      .filter((p) => p.provider !== "cowork")
       .map((p) => ({
         name: p.name,
         input: p.totalTokens.input_tokens,
@@ -168,18 +177,59 @@ export default function TokensPage() {
         cache_create: p.totalTokens.cache_creation_input_tokens,
         cache_read: p.totalTokens.cache_read_input_tokens,
       }));
-  }, [projects]);
+  }, [projectsForChart]);
 
-  // Format daily data for chart display
+  const coworkChartData = useMemo(() => {
+    return projectsForChart
+      .filter((p) => p.provider === "cowork")
+      .map((p) => ({
+        name: p.name,
+        input: p.totalTokens.input_tokens,
+        output: p.totalTokens.output_tokens,
+        cache_create: p.totalTokens.cache_creation_input_tokens,
+        cache_read: p.totalTokens.cache_read_input_tokens,
+      }));
+  }, [projectsForChart]);
+
+  // Format daily data for chart display. agent-data now returns one row per
+  // (date, provider), so we aggregate per-date here before handing it to
+  // Recharts — otherwise the same x-label appears multiple times and the
+  // stacked area chart double-counts the visible footprint.
   const formattedDaily = useMemo(() => {
     if (!dailyData) return [];
-    return dailyData.map((d) => ({
-      ...d,
-      label: new Date(d.date + "T00:00:00").toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      }),
-    }));
+    const byDate = new Map<string, {
+      date: string;
+      input_tokens: number;
+      output_tokens: number;
+      cache_creation_input_tokens: number;
+      cache_read_input_tokens: number;
+    }>();
+    for (const d of dailyData) {
+      const existing = byDate.get(d.date);
+      if (existing) {
+        existing.input_tokens += d.input_tokens;
+        existing.output_tokens += d.output_tokens;
+        existing.cache_creation_input_tokens += d.cache_creation_input_tokens;
+        existing.cache_read_input_tokens += d.cache_read_input_tokens;
+      } else {
+        byDate.set(d.date, {
+          date: d.date,
+          input_tokens: d.input_tokens,
+          output_tokens: d.output_tokens,
+          cache_creation_input_tokens: d.cache_creation_input_tokens,
+          cache_read_input_tokens: d.cache_read_input_tokens,
+        });
+      }
+    }
+    return Array.from(byDate.values())
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((d) => ({
+        ...d,
+        label: new Date(d.date + "T00:00:00").toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        }),
+      }));
   }, [dailyData]);
 
   if (isLoading || !projects) {
@@ -425,80 +475,146 @@ export default function TokensPage() {
         </Card>
       )}
 
-      {/* Per-project bar chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Tokens by Project</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {chartData.length === 0 ? (
+      {/* Per-project bar chart(s). Split Cowork into its own chart when
+          present so its multi-GB cache_read_input_tokens don't flatten the
+          Claude Code bars onto the x-axis. */}
+      {claudeChartData.length === 0 && coworkChartData.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Tokens by Project</CardTitle>
+          </CardHeader>
+          <CardContent>
             <p className="text-sm text-muted-foreground py-8 text-center">
               No token data available
             </p>
-          ) : (
-            <figure
-              role="img"
-              aria-label={`Bar chart showing token usage by project. ${chartData.length} projects.`}
-            >
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
-                  <XAxis
-                    dataKey="name"
-                    fontSize={12}
-                    tick={{ fill: colors.axis }}
-                    axisLine={{ stroke: colors.grid }}
-                    tickLine={{ stroke: colors.grid }}
-                  />
-                  <YAxis
-                    fontSize={12}
-                    tick={{ fill: colors.axis }}
-                    axisLine={{ stroke: colors.grid }}
-                    tickLine={{ stroke: colors.grid }}
-                    tickFormatter={(v) => formatTokens(v)}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: colors.tooltipBg,
-                      border: `1px solid ${colors.tooltipBorder}`,
-                      borderRadius: "8px",
-                      color: colors.tooltipText,
-                      fontSize: 13,
-                    }}
-                    labelStyle={{ color: colors.tooltipText, marginBottom: 4 }}
-                    itemStyle={{ color: colors.tooltipText, padding: "1px 0" }}
-                    formatter={(value: unknown, name: unknown) => [
-                      formatTokens(Number(value)),
-                      String(name),
-                    ]}
-                    cursor={{ fill: colors.cursor }}
-                  />
-                  <Legend
-                    content={(props) => (
-                      <InteractiveLegend
-                        payload={props.payload}
-                        hidden={barHidden}
-                        onToggle={(k) => toggleHidden("bar", k)}
-                        legendColor={colors.legend}
-                        legendMuted={colors.legendMuted}
-                      />
-                    )}
-                  />
-                  {BAR_SERIES.map((s) => (
-                    <Bar
-                      key={s.dataKey}
-                      dataKey={s.dataKey}
-                      name={s.name}
-                      fill={s.color}
-                      hide={barHidden.has(s.dataKey)}
-                    />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            </figure>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : coworkChartData.length === 0 ? (
+        <ProjectBarChart
+          title="Tokens by Project"
+          data={claudeChartData}
+          barHidden={barHidden}
+          onToggle={(k) => toggleHidden("bar", k)}
+          colors={colors}
+        />
+      ) : claudeChartData.length === 0 ? (
+        <ProjectBarChart
+          title="Tokens by Project — Cowork"
+          data={coworkChartData}
+          barHidden={barHidden}
+          onToggle={(k) => toggleHidden("bar", k)}
+          colors={colors}
+        />
+      ) : (
+        <>
+          <ProjectBarChart
+            title="Tokens by Project — Claude Code"
+            data={claudeChartData}
+            barHidden={barHidden}
+            onToggle={(k) => toggleHidden("bar", k)}
+            colors={colors}
+          />
+          <ProjectBarChart
+            title="Tokens by Project — Cowork"
+            data={coworkChartData}
+            barHidden={barHidden}
+            onToggle={(k) => toggleHidden("bar", k)}
+            colors={colors}
+          />
+        </>
+      )}
     </div>
+  );
+}
+
+interface ChartRow {
+  name: string;
+  input: number;
+  output: number;
+  cache_create: number;
+  cache_read: number;
+}
+
+function ProjectBarChart({
+  title,
+  data,
+  barHidden,
+  onToggle,
+  colors,
+}: {
+  title: string;
+  data: ChartRow[];
+  barHidden: Set<string>;
+  onToggle: (key: string) => void;
+  colors: ReturnType<typeof useChartColors>;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <figure
+          role="img"
+          aria-label={`Bar chart showing token usage by project. ${data.length} projects.`}
+        >
+          <ResponsiveContainer width="100%" height={400}>
+            <BarChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
+              <XAxis
+                dataKey="name"
+                fontSize={12}
+                tick={{ fill: colors.axis }}
+                axisLine={{ stroke: colors.grid }}
+                tickLine={{ stroke: colors.grid }}
+              />
+              <YAxis
+                fontSize={12}
+                tick={{ fill: colors.axis }}
+                axisLine={{ stroke: colors.grid }}
+                tickLine={{ stroke: colors.grid }}
+                tickFormatter={(v) => formatTokens(v)}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: colors.tooltipBg,
+                  border: `1px solid ${colors.tooltipBorder}`,
+                  borderRadius: "8px",
+                  color: colors.tooltipText,
+                  fontSize: 13,
+                }}
+                labelStyle={{ color: colors.tooltipText, marginBottom: 4 }}
+                itemStyle={{ color: colors.tooltipText, padding: "1px 0" }}
+                formatter={(value: unknown, name: unknown) => [
+                  formatTokens(Number(value)),
+                  String(name),
+                ]}
+                cursor={{ fill: colors.cursor }}
+              />
+              <Legend
+                content={(props) => (
+                  <InteractiveLegend
+                    payload={props.payload}
+                    hidden={barHidden}
+                    onToggle={onToggle}
+                    legendColor={colors.legend}
+                    legendMuted={colors.legendMuted}
+                  />
+                )}
+              />
+              {BAR_SERIES.map((s) => (
+                <Bar
+                  key={s.dataKey}
+                  dataKey={s.dataKey}
+                  name={s.name}
+                  fill={s.color}
+                  hide={barHidden.has(s.dataKey)}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </figure>
+      </CardContent>
+    </Card>
   );
 }

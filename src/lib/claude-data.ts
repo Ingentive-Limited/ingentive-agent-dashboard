@@ -34,17 +34,18 @@ import {
   projectNameFromPath,
   calculateCost,
 } from "./utils-server";
+import { pricingForModel } from "./pricing";
 
-// Anthropic pricing per million tokens (Sonnet 4 as default)
-const PRICING = {
-  input: 3.0 / 1_000_000,
-  output: 15.0 / 1_000_000,
-  cacheWrite: 3.75 / 1_000_000,
-  cacheRead: 0.30 / 1_000_000,
-};
-
-function calculateClaudeCost(tokens: TokenUsage): CostEstimate {
-  return calculateCost(tokens, PRICING);
+/**
+ * Compute cost for a Claude Code session using the model-aware pricing table.
+ * Falls back to Sonnet 4 rates when the model isn't known (older JSONLs or
+ * empty files), matching the previously hardcoded behaviour.
+ */
+function calculateClaudeCost(
+  tokens: TokenUsage,
+  model?: string | null
+): CostEstimate {
+  return calculateCost(tokens, pricingForModel(model, "claude"));
 }
 
 const IS_WIN = process.platform === "win32";
@@ -72,6 +73,8 @@ interface CachedTimeline {
   size: number;
   /** Parsed assistant-turn usage entries from the tail of the file (last ~100 lines). */
   entries: TokenTimelineEntry[];
+  /** Last `model` seen on an assistant turn in the scanned tail (or null). */
+  model: string | null;
 }
 
 interface CachedHistory {
@@ -81,6 +84,8 @@ interface CachedHistory {
   messageCount: number;
   firstTimestamp: string;
   lastTimestamp: string;
+  /** Last `model` seen on an assistant turn in the scanned tail (or null). */
+  model: string | null;
 }
 
 interface CachedDailyTokens {
@@ -90,6 +95,8 @@ interface CachedDailyTokens {
   byDate: Map<string, TokenUsage>;
   /** Session ID derived from the filename — included so dailyMap can dedupe sessions per day. */
   sessionId: string;
+  /** Last `model` seen on an assistant turn (or null) — used for per-file cost pricing. */
+  model: string | null;
 }
 
 const timelineCache = new Map<string, CachedTimeline>();
@@ -110,20 +117,21 @@ const dailyTokensCache = new Map<string, CachedDailyTokens>();
 async function readTokenTimeline(
   filePath: string,
   lineCount = 100
-): Promise<TokenTimelineEntry[]> {
+): Promise<{ entries: TokenTimelineEntry[]; model: string | null }> {
   let stat: fs.Stats;
   try {
     stat = await fs.promises.stat(filePath);
   } catch {
-    return [];
+    return { entries: [], model: null };
   }
 
   const cached = timelineCache.get(filePath);
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-    return cached.entries;
+    return { entries: cached.entries, model: cached.model };
   }
 
   const entries: TokenTimelineEntry[] = [];
+  let lastModel: string | null = null;
   try {
     const lines = await readLastLines(filePath, lineCount);
     for (const line of lines) {
@@ -140,6 +148,10 @@ async function readTokenTimeline(
             cache_read_input_tokens: u.cache_read_input_tokens || 0,
           },
         });
+        // Last `model` seen wins — entries are in chronological order, so by
+        // the end of the loop this holds the most-recent assistant model id.
+        const m = entry.message?.model;
+        if (typeof m === "string" && m.trim()) lastModel = m;
       } catch {
         // skip invalid lines
       }
@@ -152,8 +164,9 @@ async function readTokenTimeline(
     mtimeMs: stat.mtimeMs,
     size: stat.size,
     entries,
+    model: lastModel,
   });
-  return entries;
+  return { entries, model: lastModel };
 }
 
 /**
@@ -450,15 +463,17 @@ export async function getProjects(): Promise<ProjectSummary[]> {
 
     // Light token scan: read last 100 lines of most recent jsonl. Uses the
     // shared timeline cache so getOverview can reuse the same parsed entries.
+    let projectModel: string | null = null;
     if (fileStats.length > 0) {
       const sortedFiles = fileStats
         .map((f) => ({ name: f.name, mtime: f.mtime.getTime() }))
         .sort((a, b) => b.mtime - a.mtime);
 
-      const entries = await readTokenTimeline(
+      const { entries, model } = await readTokenTimeline(
         path.join(projectPath, sortedFiles[0].name),
         100
       );
+      projectModel = model;
       for (const e of entries) {
         totalTokens = addTokens(totalTokens, e.usage);
       }
@@ -473,7 +488,8 @@ export async function getProjects(): Promise<ProjectSummary[]> {
       sessionCount: jsonlFiles.length,
       lastActivity,
       totalTokens,
-      cost: calculateClaudeCost(totalTokens),
+      cost: calculateClaudeCost(totalTokens, projectModel),
+      provider: "claude",
     });
   }
 
@@ -504,6 +520,14 @@ export async function getProjectDetail(
   const tokenTimeSeries: TokenDataPoint[] = [];
   let cumulativeInput = 0;
   let cumulativeOutput = 0;
+  // Per-session cost is summed so the project total reflects mixed-model use.
+  let projectCost: CostEstimate = {
+    inputCost: 0,
+    outputCost: 0,
+    cacheWriteCost: 0,
+    cacheReadCost: 0,
+    totalCost: 0,
+  };
 
   for (const jsonl of jsonlFiles) {
     const sessionId = jsonl.replace(".jsonl", "");
@@ -512,6 +536,7 @@ export async function getProjectDetail(
     let sessionTokens = emptyTokenUsage();
     let firstMessage = "";
     let lastMessage = "";
+    let sessionModel: string | null = null;
 
     const fileStream = fs.createReadStream(filePath);
     const rl = readline.createInterface({ input: fileStream });
@@ -539,12 +564,15 @@ export async function getProjectDetail(
           sessionTokens = addTokens(sessionTokens, usage);
           cumulativeInput += usage.input_tokens;
           cumulativeOutput += usage.output_tokens;
+          const m = entry.message?.model;
+          if (typeof m === "string" && m.trim()) sessionModel = m;
 
           tokenTimeSeries.push({
             timestamp: entry.timestamp,
             ...usage,
             cumulative_input: cumulativeInput,
             cumulative_output: cumulativeOutput,
+            provider: "claude",
           });
         }
       } catch {
@@ -553,6 +581,14 @@ export async function getProjectDetail(
     }
 
     totalTokens = addTokens(totalTokens, sessionTokens);
+    const sessionCost = calculateClaudeCost(sessionTokens, sessionModel);
+    projectCost = {
+      inputCost: projectCost.inputCost + sessionCost.inputCost,
+      outputCost: projectCost.outputCost + sessionCost.outputCost,
+      cacheWriteCost: projectCost.cacheWriteCost + sessionCost.cacheWriteCost,
+      cacheReadCost: projectCost.cacheReadCost + sessionCost.cacheReadCost,
+      totalCost: projectCost.totalCost + sessionCost.totalCost,
+    };
     projectSessions.push({
       sessionId,
       messageCount,
@@ -609,7 +645,7 @@ export async function getProjectDetail(
     sessionCount: jsonlFiles.length,
     lastActivity,
     totalTokens,
-    cost: calculateClaudeCost(totalTokens),
+    cost: projectCost,
     sessions: projectSessions,
     subagents,
     memoryFiles,
@@ -816,11 +852,26 @@ export async function getOverview(): Promise<DashboardOverview> {
     (s) => s.status === "awaiting_input" || s.status === "needs_attention"
   );
 
-  // Aggregate tokens from all projects
+  // Aggregate tokens from all projects, and sum the already model-aware
+  // per-project costs so the dashboard tile prices mixed-model use correctly.
   let todayTokens = emptyTokenUsage();
+  let aggregateCost: CostEstimate = {
+    inputCost: 0,
+    outputCost: 0,
+    cacheWriteCost: 0,
+    cacheReadCost: 0,
+    totalCost: 0,
+  };
 
   for (const proj of projects) {
     todayTokens = addTokens(todayTokens, proj.totalTokens);
+    aggregateCost = {
+      inputCost: aggregateCost.inputCost + proj.cost.inputCost,
+      outputCost: aggregateCost.outputCost + proj.cost.outputCost,
+      cacheWriteCost: aggregateCost.cacheWriteCost + proj.cost.cacheWriteCost,
+      cacheReadCost: aggregateCost.cacheReadCost + proj.cost.cacheReadCost,
+      totalCost: aggregateCost.totalCost + proj.cost.totalCost,
+    };
   }
 
   // Build a simple time series from recent project data. We re-derive the
@@ -856,13 +907,15 @@ export async function getOverview(): Promise<DashboardOverview> {
 
     // Read timelines in parallel; the cache makes repeats cheap.
     const timelines = await Promise.all(
-      latestFiles.map((fp) => (fp ? readTokenTimeline(fp, 100) : Promise.resolve([])))
+      latestFiles.map((fp) =>
+        fp ? readTokenTimeline(fp, 100) : Promise.resolve({ entries: [], model: null })
+      )
     );
 
-    for (const entries of timelines) {
+    for (const t of timelines) {
       let cumIn = 0;
       let cumOut = 0;
-      for (const e of entries) {
+      for (const e of t.entries) {
         cumIn += e.usage.input_tokens;
         cumOut += e.usage.output_tokens;
         tokenTimeSeries.push({
@@ -870,6 +923,7 @@ export async function getOverview(): Promise<DashboardOverview> {
           ...e.usage,
           cumulative_input: cumIn,
           cumulative_output: cumOut,
+          provider: "claude",
         });
       }
     }
@@ -902,7 +956,7 @@ export async function getOverview(): Promise<DashboardOverview> {
     awaitingInput: awaitingInput.length,
     totalTokensToday: todayTokens,
     totalTokensMonth: monthlyTokens,
-    totalCost: calculateClaudeCost(todayTokens),
+    totalCost: aggregateCost,
     activeProjects: projects.filter((p) => {
       return (
         p.lastActivity &&
@@ -965,6 +1019,7 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
       let messageCount: number;
       let firstTimestamp: string;
       let lastTimestamp: string;
+      let sessionModel: string | null;
 
       const cached = historyCache.get(ref.filePath);
       if (
@@ -976,11 +1031,13 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
         messageCount = cached.messageCount;
         firstTimestamp = cached.firstTimestamp;
         lastTimestamp = cached.lastTimestamp;
+        sessionModel = cached.model;
       } else {
         totalTokens = emptyTokenUsage();
         messageCount = 0;
         firstTimestamp = "";
         lastTimestamp = "";
+        sessionModel = null;
         try {
           const lines = await readLastLines(ref.filePath, 50);
           for (const line of lines) {
@@ -999,6 +1056,8 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
                   cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
                   cache_read_input_tokens: u.cache_read_input_tokens || 0,
                 });
+                const m = entry.message?.model;
+                if (typeof m === "string" && m.trim()) sessionModel = m;
               }
             } catch { /* skip */ }
           }
@@ -1010,6 +1069,7 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
           messageCount,
           firstTimestamp,
           lastTimestamp,
+          model: sessionModel,
         });
       }
 
@@ -1026,7 +1086,7 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
           : lastTimestamp || stat.mtime.toISOString(),
         entrypoint: active?.entrypoint || "cli",
         totalTokens,
-        cost: calculateClaudeCost(totalTokens),
+        cost: calculateClaudeCost(totalTokens, sessionModel),
         messageCount,
         status: active?.status || (aliveIds.has(ref.sessionId) ? "running" : "dead"),
         provider: "claude" as const,
@@ -1263,7 +1323,13 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
   cutoff.setHours(0, 0, 0, 0);
   const cutoffMs = cutoff.getTime();
 
-  const dailyMap = new Map<string, { tokens: TokenUsage; sessions: Set<string> }>();
+  // Per-day aggregation. `cost` accumulates the (model-aware) cost
+  // contribution of each session-day, so a day spanning Opus and Sonnet
+  // sessions is priced correctly without averaging.
+  const dailyMap = new Map<
+    string,
+    { tokens: TokenUsage; sessions: Set<string>; cost: number }
+  >();
 
   const allDirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
   const dirs = allDirs.filter((d) => d.isDirectory());
@@ -1312,6 +1378,7 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
       }
 
       const byDate = new Map<string, TokenUsage>();
+      let fileModel: string | null = null;
       try {
         const stream = fs.createReadStream(ref.filePath, { encoding: "utf-8" });
         const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -1333,6 +1400,8 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
                 cache_read_input_tokens: u.cache_read_input_tokens || 0,
               })
             );
+            const m = entry.message?.model;
+            if (typeof m === "string" && m.trim()) fileModel = m;
           } catch { /* skip */ }
         }
       } catch {
@@ -1344,6 +1413,7 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
         size: stat.size,
         byDate,
         sessionId: ref.sessionId,
+        model: fileModel,
       };
       dailyTokensCache.set(ref.filePath, fresh);
       return fresh;
@@ -1360,11 +1430,18 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
       const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
       if (dateKey < cutoffKey) continue;
       if (!dailyMap.has(dateKey)) {
-        dailyMap.set(dateKey, { tokens: emptyTokenUsage(), sessions: new Set() });
+        dailyMap.set(dateKey, {
+          tokens: emptyTokenUsage(),
+          sessions: new Set(),
+          cost: 0,
+        });
       }
       const day = dailyMap.get(dateKey)!;
       day.tokens = addTokens(day.tokens, tokens);
       day.sessions.add(result.sessionId);
+      // Price this file's contribution at its own model's rate so a day with
+      // Opus + Sonnet sessions accumulates the correct blended cost.
+      day.cost += calculateClaudeCost(tokens, result.model).totalCost;
     }
   }
 
@@ -1375,12 +1452,12 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
     const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const day = dailyMap.get(dateKey);
     if (day) {
-      const cost = calculateClaudeCost(day.tokens);
       result.push({
         date: dateKey,
         ...day.tokens,
-        totalCost: cost.totalCost,
+        totalCost: day.cost,
         sessionCount: day.sessions.size,
+        provider: "claude",
       });
     } else {
       result.push({
@@ -1391,6 +1468,7 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
         cache_read_input_tokens: 0,
         totalCost: 0,
         sessionCount: 0,
+        provider: "claude",
       });
     }
   }
@@ -1420,6 +1498,13 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
     let lastActivity = "";
     let errorCount = 0;
     let successCount = 0;
+    let projectCost: CostEstimate = {
+      inputCost: 0,
+      outputCost: 0,
+      cacheWriteCost: 0,
+      cacheReadCost: 0,
+      totalCost: 0,
+    };
 
     for (const file of files) {
       const filePath = path.join(projPath, file);
@@ -1431,18 +1516,24 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
         // Read last 20 lines to check outcome and tally tokens
         const lines = await readLastLines(filePath, 50);
         let sessionHasError = false;
+        let sessionTokens = emptyTokenUsage();
+        let sessionModel: string | null = null;
 
         for (const line of lines) {
           try {
             const entry = JSON.parse(line);
             if (entry.type === "assistant" && entry.message?.usage) {
               const u = entry.message.usage;
-              totalTokens = addTokens(totalTokens, {
+              const usage: TokenUsage = {
                 input_tokens: u.input_tokens || 0,
                 output_tokens: u.output_tokens || 0,
                 cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
                 cache_read_input_tokens: u.cache_read_input_tokens || 0,
-              });
+              };
+              totalTokens = addTokens(totalTokens, usage);
+              sessionTokens = addTokens(sessionTokens, usage);
+              const m = entry.message?.model;
+              if (typeof m === "string" && m.trim()) sessionModel = m;
             }
             // Check for error indicators
             if (entry.type === "assistant" && entry.message?.content) {
@@ -1457,6 +1548,15 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
             }
           } catch { /* skip */ }
         }
+
+        const sessionCost = calculateClaudeCost(sessionTokens, sessionModel);
+        projectCost = {
+          inputCost: projectCost.inputCost + sessionCost.inputCost,
+          outputCost: projectCost.outputCost + sessionCost.outputCost,
+          cacheWriteCost: projectCost.cacheWriteCost + sessionCost.cacheWriteCost,
+          cacheReadCost: projectCost.cacheReadCost + sessionCost.cacheReadCost,
+          totalCost: projectCost.totalCost + sessionCost.totalCost,
+        };
 
         if (sessionHasError) {
           errorCount++;
@@ -1473,12 +1573,13 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
       id: dir.name,
       name: projectNameFromPath(realPath),
       totalTokens,
-      cost: calculateClaudeCost(totalTokens),
+      cost: projectCost,
       sessionCount: files.length,
       lastActivity,
       errorCount,
       successCount,
       errorRate: total > 0 ? errorCount / total : 0,
+      provider: "claude",
     });
   }
 
