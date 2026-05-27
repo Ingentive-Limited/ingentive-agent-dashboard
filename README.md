@@ -15,7 +15,7 @@ Ingentive Agent OS reads data directly from `~/.claude/`, `~/.codex/`, and the C
 - **Session History** - Full history of all sessions (active and dead) with expandable conversation preview and error surfacing, for all providers
 - **Projects** - All projects with session counts, last activity, token summaries, and cost estimates. Sort by name, activity, tokens, cost, or sessions. Group by parent directory. Cowork sessions are grouped per workspace
 - **Project Detail** - Per-project view with session history, token usage charts, subagents, and memory files
-- **Token Usage** - Stacked charts showing input/output/cache token breakdown per project, with per-provider pricing (Claude Sonnet 4 for Claude Code & Cowork, GPT-5.3-codex for Codex). Hour/day boundary markers on the X-axis make it easy to spot when consumption spikes during the day
+- **Token Usage** - Stacked charts showing input/output/cache token breakdown per project. Cowork sessions render in their own panel so cache-read totals don't dominate Claude Code numbers. Costs are **model-aware** — Opus, Sonnet, Haiku, and the gpt-5.x family each price at their published API rates (cache reads at 10% of input, cache writes at 1.25x). Hour/day boundary markers on the X-axis use a stride chosen automatically for the visible time span (hourly for a few hours, every 3–6 hours over a day, daily over a week)
 - **Scheduled Tasks** - All scheduled tasks grouped by project, pulled from Claude Desktop
 - **Global Search** - Search across projects, sessions, and conversations with Cmd/Ctrl+K
 - **Cost Tracking** - Estimated USD costs based on each provider's API pricing, with an API/Subscription toggle to hide costs for subscription users
