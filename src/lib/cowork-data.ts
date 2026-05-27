@@ -47,6 +47,7 @@ import {
   projectNameFromPath,
   calculateCost,
   isWithinDir,
+  formatLocalDate,
 } from "./utils-server";
 
 // Cowork runs on Anthropic models — use the same Sonnet 4 pricing as Claude.
@@ -113,13 +114,31 @@ function coworkRootExists(): boolean {
   return fs.existsSync(COWORK_ROOT);
 }
 
+// Module-level cache for the manifest discovery walk. The dashboard polls
+// /api/overview and /api/tokens/daily every 5 seconds; without this cache,
+// every poll re-walks the entire local-agent-mode-sessions tree and re-parses
+// every manifest JSON. A 5s TTL keeps the UI responsive while still picking up
+// new sessions within one polling cycle.
+let manifestsCache: DiscoveredManifest[] | null = null;
+let manifestsCacheAt = 0;
+const MANIFESTS_TTL_MS = 5_000;
+
 /**
  * Walk `local-agent-mode-sessions/<account>/<workspace>/local_*.json` and
  * return each parsed manifest along with its account + workspace identifiers.
  * Returns an empty list if Cowork data isn't present.
  */
 async function discoverManifests(): Promise<DiscoveredManifest[]> {
-  if (!coworkRootExists()) return [];
+  const now = Date.now();
+  if (manifestsCache && now - manifestsCacheAt < MANIFESTS_TTL_MS) {
+    return manifestsCache;
+  }
+
+  if (!coworkRootExists()) {
+    manifestsCache = [];
+    manifestsCacheAt = now;
+    return manifestsCache;
+  }
 
   const results: DiscoveredManifest[] = [];
 
@@ -177,6 +196,8 @@ async function discoverManifests(): Promise<DiscoveredManifest[]> {
     }
   }
 
+  manifestsCache = results;
+  manifestsCacheAt = now;
   return results;
 }
 
@@ -327,6 +348,18 @@ function manifestToSession(item: DiscoveredManifest): ClaudeSession {
   };
 }
 
+// Module-level cache for parsed token totals per audit file. Audit JSONL files
+// grow monotonically (entries are only appended), so the token total can only
+// change when the file's mtime or size changes. Keying by both mtime and size
+// guards against rapid writes that land within the same millisecond, which
+// would otherwise hand back stale token counts.
+interface CachedTokens {
+  mtimeMs: number;
+  size: number;
+  tokens: TokenUsage;
+}
+const tokensCache = new Map<string, CachedTokens>();
+
 /**
  * Sum the `usage` fields from every assistant turn in a Cowork audit.jsonl.
  * Each assistant entry's `message.usage` has the standard Anthropic shape
@@ -334,8 +367,25 @@ function manifestToSession(item: DiscoveredManifest): ClaudeSession {
  * `cache_read_input_tokens`).
  */
 async function tokensFromAudit(auditPath: string): Promise<TokenUsage> {
+  if (!fs.existsSync(auditPath)) return emptyTokenUsage();
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(auditPath);
+  } catch {
+    return emptyTokenUsage();
+  }
+
+  const cached = tokensCache.get(auditPath);
+  if (
+    cached &&
+    cached.mtimeMs === stat.mtimeMs &&
+    cached.size === stat.size
+  ) {
+    return cached.tokens;
+  }
+
   let total = emptyTokenUsage();
-  if (!fs.existsSync(auditPath)) return total;
   try {
     // Read up to ~5000 lines from the tail — enough for very long sessions
     // without paying to stream multi-MB files.
@@ -359,6 +409,12 @@ async function tokensFromAudit(auditPath: string): Promise<TokenUsage> {
   } catch {
     // ignore
   }
+
+  tokensCache.set(auditPath, {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    tokens: total,
+  });
   return total;
 }
 
@@ -392,14 +448,17 @@ export async function getProjects(): Promise<ProjectSummary[]> {
 
   const summaries: ProjectSummary[] = [];
   for (const [workspaceId, items] of byWorkspace.entries()) {
+    // Read tokens for each session in parallel — these are independent local
+    // FS reads, and serializing them was the main cold-start bottleneck.
+    const tokensPerItem = await Promise.all(
+      items.map((item) => tokensFromAudit(transcriptPathFor(item.manifestPath)))
+    );
     let totalTokens = emptyTokenUsage();
     let lastActivity = 0;
-    for (const item of items) {
-      totalTokens = addTokens(
-        totalTokens,
-        await tokensFromAudit(transcriptPathFor(item.manifestPath))
-      );
-      const t = item.manifest.lastActivityAt ?? item.manifest.createdAt ?? 0;
+    for (let i = 0; i < items.length; i++) {
+      totalTokens = addTokens(totalTokens, tokensPerItem[i]);
+      const t =
+        items[i].manifest.lastActivityAt ?? items[i].manifest.createdAt ?? 0;
       if (t > lastActivity) lastActivity = t;
     }
     // Use the most-recent session's title as the project label so users see
@@ -449,8 +508,15 @@ export async function getProjectDetail(
   const sorted = [...items].sort(
     (a, b) => (a.manifest.createdAt ?? 0) - (b.manifest.createdAt ?? 0)
   );
-  for (const item of sorted) {
-    const tokens = await tokensFromAudit(transcriptPathFor(item.manifestPath));
+  // First pass: read tokens for every session in parallel. Cumulative totals
+  // depend on createdAt ordering, so we resolve them all first and then walk
+  // in order in the second pass.
+  const tokensPerItem = await Promise.all(
+    sorted.map((item) => tokensFromAudit(transcriptPathFor(item.manifestPath)))
+  );
+  for (let i = 0; i < sorted.length; i++) {
+    const item = sorted[i];
+    const tokens = tokensPerItem[i];
     totalTokens = addTokens(totalTokens, tokens);
     cumulativeInput += tokens.input_tokens;
     cumulativeOutput += tokens.output_tokens;
@@ -533,11 +599,25 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
   const byDay = new Map<string, TokenUsage>();
   const sessionsByDay = new Map<string, number>();
 
-  for (const item of manifests) {
+  // Only sessions created within the requested window can contribute to the
+  // result; pre-filter so we don't pay the audit-read cost for every manifest
+  // ever recorded.
+  const cutoff = Date.now() - days * 86_400_000;
+  const relevant = manifests.filter((item) => {
     const created = item.manifest.createdAt ?? 0;
-    if (!created) continue;
-    const dateStr = new Date(created).toISOString().split("T")[0];
-    const tokens = await tokensFromAudit(transcriptPathFor(item.manifestPath));
+    return created > 0 && created >= cutoff;
+  });
+
+  // Read all audit files in parallel — these are independent FS reads and
+  // sequential awaits were the dominant cold-start cost.
+  const tokensPerItem = await Promise.all(
+    relevant.map((item) => tokensFromAudit(transcriptPathFor(item.manifestPath)))
+  );
+
+  for (let i = 0; i < relevant.length; i++) {
+    const created = relevant[i].manifest.createdAt ?? 0;
+    const dateStr = formatLocalDate(new Date(created));
+    const tokens = tokensPerItem[i];
     byDay.set(dateStr, addTokens(byDay.get(dateStr) ?? emptyTokenUsage(), tokens));
     sessionsByDay.set(dateStr, (sessionsByDay.get(dateStr) ?? 0) + 1);
   }
@@ -547,7 +627,7 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = formatLocalDate(d);
     const tokens = byDay.get(dateStr) ?? emptyTokenUsage();
     result.push({
       date: dateStr,
@@ -566,7 +646,7 @@ function fillEmptyDays(days: number): DailyTokenUsage[] {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
     result.push({
-      date: d.toISOString().split("T")[0],
+      date: formatLocalDate(d),
       input_tokens: 0,
       output_tokens: 0,
       cache_creation_input_tokens: 0,
@@ -826,10 +906,10 @@ export async function getOverview(): Promise<DashboardOverview> {
   let totalTokensMonth = emptyTokenUsage();
 
   const daily = await getDailyTokenUsage(30);
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = formatLocalDate(new Date());
   const monthStart = new Date();
   monthStart.setDate(1);
-  const monthStartStr = monthStart.toISOString().split("T")[0];
+  const monthStartStr = formatLocalDate(monthStart);
 
   for (const day of daily) {
     const dayTokens: TokenUsage = {
@@ -846,11 +926,14 @@ export async function getOverview(): Promise<DashboardOverview> {
     }
   }
 
-  // Per-session token time series for the most recent projects
+  // Per-session token time series for the most recent projects. Fetch the
+  // top-3 project details in parallel rather than sequentially.
   const tokenTimeSeries: TokenDataPoint[] = [];
   const recentProjects = projects.slice(0, 3);
-  for (const proj of recentProjects) {
-    const detail = await getProjectDetail(proj.id);
+  const recentDetails = await Promise.all(
+    recentProjects.map((proj) => getProjectDetail(proj.id))
+  );
+  for (const detail of recentDetails) {
     if (detail) tokenTimeSeries.push(...detail.tokenTimeSeries);
   }
 

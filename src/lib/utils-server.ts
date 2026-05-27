@@ -32,6 +32,25 @@ export function isPidAlive(pid: number): boolean {
 }
 
 /**
+ * Format a Date as `YYYY-MM-DD` using LOCAL date components.
+ *
+ * `Date#toISOString().slice(0, 10)` looks tempting but is wrong: across a DST
+ * spring-forward boundary, calling `setDate(getDate() + 1)` on a midnight-
+ * local date advances local time by one day yet only advances UTC time by
+ * 23 hours, so two consecutive cursor iterations can produce the SAME ISO
+ * date string. That manifested as a duplicate React key on the activity
+ * heatmap ("Encountered two children with the same key, 2026-03-29") and as
+ * a missing day in token aggregations. Using local components avoids the
+ * issue entirely.
+ */
+export function formatLocalDate(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/**
  * Check whether `filePath` is contained within `baseDir`, defending against
  * both lexical traversal (`../`) and symlink escapes.
  *

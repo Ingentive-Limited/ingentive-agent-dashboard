@@ -63,7 +63,15 @@ export function ActivityHeatmap({ data }: { data: DailyTokenUsage[] }) {
     let currentWeek: { date: string; value: number; dateObj: Date }[] = [];
 
     while (cursor <= today) {
-      const dateKey = cursor.toISOString().slice(0, 10);
+      // Use LOCAL date components rather than toISOString() — across a DST
+      // spring-forward boundary, `setDate(getDate() + 1)` adds 24 hours but
+      // the local date advances by one day, so toISOString() can yield the
+      // same UTC date string for two successive local-midnight cursors and
+      // produce a duplicate React key (e.g. "2026-03-29" appears twice).
+      const yyyy = cursor.getFullYear();
+      const mm = String(cursor.getMonth() + 1).padStart(2, "0");
+      const dd = String(cursor.getDate()).padStart(2, "0");
+      const dateKey = `${yyyy}-${mm}-${dd}`;
       const dayOfWeek = cursor.getDay();
 
       if (dayOfWeek === 0 && currentWeek.length > 0) {

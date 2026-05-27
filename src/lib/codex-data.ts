@@ -31,6 +31,7 @@ import {
   projectNameFromPath,
   calculateCost,
   isWithinDir,
+  formatLocalDate,
 } from "./utils-server";
 
 // OpenAI pricing per million tokens (GPT-5.3-codex as default)
@@ -485,7 +486,7 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split("T")[0];
+      const dateStr = formatLocalDate(d);
       const match = rows.find((r) => r.day === dateStr);
       const total = match?.total || 0;
       const tokens: TokenUsage = {
@@ -803,10 +804,10 @@ export async function getOverview(): Promise<DashboardOverview> {
 
   // Aggregate from daily token data
   const dailyData = await getDailyTokenUsage(30);
-  const today = new Date().toISOString().split("T")[0];
+  const today = formatLocalDate(new Date());
   const monthStart = new Date();
   monthStart.setDate(1);
-  const monthStartStr = monthStart.toISOString().split("T")[0];
+  const monthStartStr = formatLocalDate(monthStart);
 
   for (const day of dailyData) {
     const dayTokens: TokenUsage = {
