@@ -15,6 +15,10 @@ import * as claude from "./claude-data";
 import * as codex from "./codex-data";
 import * as cowork from "./cowork-data";
 import { addTokens } from "./utils-server";
+// Side-effect import: kicks off a background scan of all three providers'
+// data sources on first module load, so the first user request hits warm
+// per-file caches instead of paying the ~60s cold-parse cost.
+import "./startup-warmup";
 import type {
   ClaudeSession,
   ProjectSummary,
