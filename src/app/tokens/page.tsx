@@ -372,14 +372,19 @@ export default function TokensPage() {
         {isApi && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+              <CardTitle
+                className="text-sm font-medium flex items-center gap-1.5"
+                title="Sum of per-message token usage priced at each model's public API rate. Cache reads are charged at 10% of input rate; cache writes at 1.25x input rate. If you're on a Pro / Max / Teams subscription, this is theoretical — Anthropic charges your flat monthly fee instead."
+              >
                 <DollarSign className="h-3.5 w-3.5" aria-hidden="true" />
-                Estimated Cost
+                API-equivalent Cost
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{formatCost(totalCost)}</div>
-              <p className="text-xs text-muted-foreground">Last {dateRange} days</p>
+              <p className="text-xs text-muted-foreground">
+                Last {dateRange} days · if billed per-token
+              </p>
             </CardContent>
           </Card>
         )}
@@ -391,9 +396,9 @@ export default function TokensPage() {
           <CardContent className="flex items-center gap-3 py-3">
             <DollarSign className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">
-              Equivalent API cost for this period would be{" "}
+              At public per-token API rates this usage would total{" "}
               <span className="font-medium text-foreground">{formatCost(totalCost)}</span>
-              {" "}based on current Sonnet pricing.
+              {" "}— on a Pro / Max / Teams subscription Anthropic charges your flat monthly fee instead.
             </p>
           </CardContent>
         </Card>

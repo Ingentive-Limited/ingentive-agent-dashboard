@@ -171,26 +171,44 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Dashboard</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2 text-xs"
-          onClick={toggle}
-          aria-label={isApi ? "Billing mode: API tokens. Click to switch to subscription" : "Billing mode: Subscription. Click to switch to API"}
-          title={isApi ? "Using API tokens (costs tracked)" : "Using subscription (no token costs)"}
-        >
-          {isApi ? (
-            <>
-              <Key className="h-3.5 w-3.5" aria-hidden="true" />
-              API
-            </>
-          ) : (
-            <>
-              <CreditCard className="h-3.5 w-3.5" aria-hidden="true" />
-              Subscription
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/*
+            Billing-mode hint: prompt-caching on Anthropic models can rack up
+            multi-billion-token totals, which look terrifying when displayed
+            as a per-token API price ($20K+ on a heavy Cowork user) but are
+            meaningless if the user is on a Pro / Max / Teams subscription
+            that charges a flat monthly fee. The toggle controls whether the
+            cost card is shown at all; this label makes the current mode and
+            its implication explicit so a subscription user doesn't have to
+            decode a tiny icon button to understand why their "estimated
+            cost" suddenly says $20,000.
+          */}
+          <span className="text-xs text-muted-foreground">
+            {isApi
+              ? "Showing API-equivalent cost"
+              : "Subscription mode — costs hidden"}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-xs"
+            onClick={toggle}
+            aria-label={isApi ? "Billing mode: API. Click to switch to subscription mode and hide cost figures." : "Billing mode: Subscription. Click to switch to API mode and show theoretical per-token cost."}
+            title={isApi ? "Click to switch to Subscription mode (hides cost figures)" : "Click to switch to API mode (shows what this usage would cost if billed per-token)"}
+          >
+            {isApi ? (
+              <>
+                <Key className="h-3.5 w-3.5" aria-hidden="true" />
+                API
+              </>
+            ) : (
+              <>
+                <CreditCard className="h-3.5 w-3.5" aria-hidden="true" />
+                Subscription
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       <OverviewCards data={data} showCost={isApi} />

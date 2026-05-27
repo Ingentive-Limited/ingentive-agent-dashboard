@@ -46,7 +46,12 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
       {showCost && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Estimated Cost</CardTitle>
+            <CardTitle
+              className="text-sm font-medium"
+              title="What this usage would cost if billed at Anthropic / OpenAI public per-token API rates. Subscription plans (Pro / Max / Teams) charge a flat monthly fee regardless of token volume."
+            >
+              API-equivalent Cost
+            </CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           </CardHeader>
           <CardContent>
@@ -54,7 +59,7 @@ export function OverviewCards({ data, showCost = true }: OverviewCardsProps) {
               {formatCost(data.totalCost.totalCost)}
             </div>
             <p className="text-xs text-muted-foreground">
-              active sessions only
+              if billed per-token (subscription pays a flat fee)
             </p>
           </CardContent>
         </Card>
