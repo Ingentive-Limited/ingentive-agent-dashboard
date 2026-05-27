@@ -1,27 +1,27 @@
 # Ingentive Agent OS
 
-A local management dashboard for monitoring and interacting with your active **Claude Code** and **OpenAI Codex** sessions, projects, token usage, and scheduled tasks. Works on macOS, Windows, and Linux.
+A local management dashboard for monitoring and interacting with your active **Claude Code**, **OpenAI Codex**, and **Claude Cowork** sessions, projects, token usage, and scheduled tasks. Works on macOS, Windows, and Linux.
 
 ![Ingentive Agent OS Dashboard](preview.png)
 
-Ingentive Agent OS reads data directly from `~/.claude/` and `~/.codex/` on your filesystem — plus the Claude Desktop app storage — to give you real-time visibility into everything your AI coding agents are doing on your machine. Switch between providers with a single click, or view sessions from both side-by-side.
+Ingentive Agent OS reads data directly from `~/.claude/`, `~/.codex/`, and the Claude Desktop app storage to give you real-time visibility into everything your AI coding agents are doing on your machine. Switch between providers with a single click, or view sessions from all three side-by-side.
 
 ## Features
 
-- **Multi-provider support** - Monitor Claude Code and OpenAI Codex sessions in one dashboard. A provider switcher in the sidebar filters every page to Claude, Codex, or both. Codex sessions are picked up whether they originate from the `codex` CLI, the Codex Desktop app, or the Codex VSCode extension
+- **Multi-provider support** - Monitor Claude Code, OpenAI Codex, and Claude Cowork sessions in one dashboard. A provider switcher in the sidebar filters every page to All, Claude, or Codex. Cowork is grouped under "Claude" because both run on Anthropic models — Cowork sessions appear as their own per-workspace projects in the projects list, with the `Cowork` entrypoint badge in the sessions table. Codex sessions are picked up whether they originate from the `codex` CLI, the Codex Desktop app, or the Codex VSCode extension
 - **Dashboard** - Overview of active sessions, token usage, estimated costs, active projects, scheduled tasks, and a token usage chart
-- **Sessions** - Live session list with status indicators (running, processing, idle, awaiting input), PID, duration, and entrypoint (CLI / Desktop / VSCode)
-- **Awaiting Input** - Sessions where your agent is waiting for your response (including Codex `request_user_input` prompts), with configurable browser notifications
-- **Session History** - Full history of all sessions (active and dead) with expandable conversation preview and error surfacing, for both providers
-- **Projects** - All projects with session counts, last activity, token summaries, and cost estimates. Sort by name, activity, tokens, cost, or sessions. Group by parent directory
+- **Sessions** - Live session list with status indicators (running, processing, idle, awaiting input), PID, duration, and entrypoint (CLI / Desktop / VSCode / Cowork)
+- **Awaiting Input** - Sessions where your agent is waiting for your response (including Codex `request_user_input` prompts and Cowork `AskUserQuestion` turns), with configurable browser notifications
+- **Session History** - Full history of all sessions (active and dead) with expandable conversation preview and error surfacing, for all providers
+- **Projects** - All projects with session counts, last activity, token summaries, and cost estimates. Sort by name, activity, tokens, cost, or sessions. Group by parent directory. Cowork sessions are grouped per workspace
 - **Project Detail** - Per-project view with session history, token usage charts, subagents, and memory files
-- **Token Usage** - Stacked charts showing input/output/cache token breakdown per project, with per-provider pricing (Claude Sonnet 4 vs. GPT-5.3-codex). Hour/day boundary markers on the X-axis make it easy to spot when consumption spikes during the day, with stride automatically chosen for the visible time span (hourly for a few hours, every 3–6 hours over a day, daily over a week)
+- **Token Usage** - Stacked charts showing input/output/cache token breakdown per project. Cowork sessions render in their own panel so cache-read totals don't dominate Claude Code numbers. Costs are **model-aware** — Opus, Sonnet, Haiku, and the gpt-5.x family each price at their published API rates (cache reads at 10% of input, cache writes at 1.25x). Hour/day boundary markers on the X-axis use a stride chosen automatically for the visible time span (hourly for a few hours, every 3–6 hours over a day, daily over a week)
 - **Scheduled Tasks** - All scheduled tasks grouped by project, pulled from Claude Desktop
 - **Global Search** - Search across projects, sessions, and conversations with Cmd/Ctrl+K
 - **Cost Tracking** - Estimated USD costs based on each provider's API pricing, with an API/Subscription toggle to hide costs for subscription users
-- **Session Interaction** - Click any session to open it directly in your terminal via `claude -r` or `codex --resume`
-- **Conversation Viewer** - Inline viewer that renders both Claude's tool-use blocks and Codex's output messages, with correct speaker labels
-- **System Status** - Live API health indicators for both Claude (status.anthropic.com) and Codex (status.openai.com), plus CLI versions
+- **Session Interaction** - Click any session to open it directly in your terminal via `claude -r` or `codex --resume`. Cowork sessions are display-only because they live inside the Claude Desktop app and can't be resumed from a terminal
+- **Conversation Viewer** - Inline viewer that renders Claude's tool-use blocks, Codex's output messages, and Cowork audit transcripts with correct speaker labels
+- **System Status** - Live API health indicators for Claude (status.anthropic.com) and Codex (status.openai.com), plus CLI versions and a "via Claude Desktop" indicator for Cowork
 - **Dark/Light Mode** - Full theme support with the Ingentive brand
 
 ## Tech Stack
@@ -124,7 +124,7 @@ A GitHub Actions workflow (`.github/workflows/test.yml`) runs on every pull requ
 
 ## Data Sources
 
-All data is read server-side from the local filesystem. No external APIs or databases are required (except opt-in public status page checks at `status.anthropic.com` and `status.openai.com`).
+All data is read server-side from the local filesystem. No external APIs or databases are required (except opt-in public status page checks at `status.anthropic.com` and `status.openai.com`). Cowork sessions reuse the Anthropic status check.
 
 ### Claude
 
@@ -146,6 +146,15 @@ All data is read server-side from the local filesystem. No external APIs or data
 | Skills | `~/.codex/skills/*.md` | Installed Codex skills |
 
 Codex does not expose a native scheduled-tasks concept, so the Scheduled Tasks view is Claude-only.
+
+### Cowork
+
+| Source | Location | Data |
+|--------|----------|------|
+| Session manifest | `<app-data-dir>/local-agent-mode-sessions/<account>/<workspace>/local_<uuid>.json` | Title, cwd, model, createdAt/lastActivityAt, archived flag, initial message, configured tools/skills |
+| Conversation transcript | `<app-data-dir>/local-agent-mode-sessions/<account>/<workspace>/local_<uuid>/audit.jsonl` | User / assistant turns with token usage (same shape as Claude Code's JSONL plus audit fields) |
+
+Cowork uses the same Anthropic pricing as Claude Code (Sonnet 4). Cowork sessions can't be resumed from a terminal — they live entirely inside the Claude Desktop app — so the "open in terminal" action returns an explanatory error for them. Scheduled tasks for Cowork are surfaced through the existing Claude scheduled-tasks scan (Cowork inherits Claude's scheduling system).
 
 ## Session Status Detection
 
@@ -171,6 +180,17 @@ Session status is determined by reading the last meaningful entry in each sessio
 | `response_item` `function_call` (tool running) or `function_call_output` | Running |
 | `event_msg` with `user_message` | Processing |
 | `archived = 1` in SQLite | Dead |
+
+### Cowork
+
+| Last Entry | Status |
+|-----------|--------|
+| `lastActivityAt` within the last 30 seconds | Running |
+| Assistant turn with `stop_reason: "end_turn"` | Awaiting input |
+| Assistant turn with `AskUserQuestion` or `ExitPlanMode` tool use | Needs attention |
+| Assistant turn with `stop_reason: "tool_use"` (any other tool) | Running |
+| User message | Processing |
+| `isArchived = true` in manifest | Dead |
 
 ## License
 

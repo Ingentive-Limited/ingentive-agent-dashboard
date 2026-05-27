@@ -12,7 +12,7 @@ import {
   Legend,
   ReferenceLine,
 } from "recharts";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/hooks/use-theme";
 import type { TokenDataPoint } from "@/lib/types";
 import { formatTokens } from "@/lib/utils";
 

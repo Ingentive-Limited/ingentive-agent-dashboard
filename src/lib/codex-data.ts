@@ -31,21 +31,23 @@ import {
   projectNameFromPath,
   calculateCost,
   isWithinDir,
+  formatLocalDate,
 } from "./utils-server";
+import { pricingForModel } from "./pricing";
 
-// OpenAI pricing per million tokens (GPT-5.3-codex as default)
-const CODEX_PRICING = {
-  input: 2.0 / 1_000_000,
-  output: 8.0 / 1_000_000,
-  cacheWrite: 0,
-  cacheRead: 0,
-  reasoning: 8.0 / 1_000_000,
-};
-
-function calculateCodexCost(tokens: TokenUsage): CostEstimate {
-  const base = calculateCost(tokens, CODEX_PRICING);
-  // Add reasoning token cost if present
-  const reasoningCost = (tokens.reasoning_tokens || 0) * (CODEX_PRICING.reasoning || 0);
+/**
+ * Compute cost for a Codex thread using the model-aware pricing table.
+ * Defaults to gpt-5.3-codex rates when the model isn't known or the thread is
+ * an older NULL-model archive row.
+ */
+function calculateCodexCost(
+  tokens: TokenUsage,
+  model?: string | null
+): CostEstimate {
+  const pricing = pricingForModel(model, "codex");
+  const base = calculateCost(tokens, pricing);
+  const reasoningCost =
+    (tokens.reasoning_tokens || 0) * (pricing.reasoning || 0);
   return {
     ...base,
     totalCost: base.totalCost + reasoningCost,
@@ -83,14 +85,35 @@ function codexDirExists(): boolean {
   return fs.existsSync(STATE_DB_PATH);
 }
 
+// Module-level singleton connection. `better-sqlite3` is synchronous and we
+// only ever open this database read-only, so a single connection is reused
+// for the lifetime of the process. This avoids the open/close cost on every
+// public function call (the dashboard fans out to 3+ calls per overview).
+let dbInstance: Database.Database | null = null;
 function openDb(): Database.Database | null {
   if (!codexDirExists()) return null;
+  if (dbInstance) return dbInstance;
   try {
-    return new Database(STATE_DB_PATH, { readonly: true, fileMustExist: true });
+    dbInstance = new Database(STATE_DB_PATH, { readonly: true, fileMustExist: true });
+    return dbInstance;
   } catch {
     return null;
   }
 }
+
+// Module-level cache for rollout-tail status reads. `getStatusFromRollout`
+// is called per session row by `threadToSession`, which means a fresh
+// `getActiveSessions`/`getSessionHistory` would otherwise tail-read every
+// JSONL file on disk. Rollout files grow monotonically (entries are only
+// appended), so the cached status can only change when the file's mtime or
+// size changes — keying by both guards against rapid writes that land in
+// the same millisecond.
+interface CachedRolloutStatus {
+  mtimeMs: number;
+  size: number;
+  result: { status: SessionStatus; lastMessage?: string };
+}
+const rolloutStatusCache = new Map<string, CachedRolloutStatus>();
 
 /**
  * Determine session status by reading the last few lines of the Codex JSONL
@@ -110,9 +133,25 @@ export function getStatusFromRollout(rolloutPath: string | null): {
 
   if (!fs.existsSync(fullPath)) return { status: "idle" };
 
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(fullPath);
+  } catch {
+    return { status: "idle" };
+  }
+
+  const cached = rolloutStatusCache.get(fullPath);
+  if (
+    cached &&
+    cached.mtimeMs === stat.mtimeMs &&
+    cached.size === stat.size
+  ) {
+    return cached.result;
+  }
+
+  const compute = (): { status: SessionStatus; lastMessage?: string } => {
   try {
     // Read last ~4KB to find the final entries
-    const stat = fs.statSync(fullPath);
     const readSize = Math.min(stat.size, 4096);
     const buf = Buffer.alloc(readSize);
     const fd = fs.openSync(fullPath, "r");
@@ -238,6 +277,15 @@ export function getStatusFromRollout(rolloutPath: string | null): {
   }
 
   return { status: "idle" };
+  };
+
+  const result = compute();
+  rolloutStatusCache.set(fullPath, {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    result,
+  });
+  return result;
 }
 
 function threadToSession(row: ThreadRow): ClaudeSession {
@@ -299,14 +347,10 @@ function tokensFromRow(row: ThreadRow): TokenUsage {
 export async function getActiveSessions(): Promise<ClaudeSession[]> {
   const db = openDb();
   if (!db) return [];
-  try {
-    const rows = db.prepare(
-      "SELECT * FROM threads WHERE archived = 0 ORDER BY updated_at DESC"
-    ).all() as ThreadRow[];
-    return rows.map(threadToSession);
-  } finally {
-    db.close();
-  }
+  const rows = db.prepare(
+    "SELECT * FROM threads WHERE archived = 0 ORDER BY updated_at DESC"
+  ).all() as ThreadRow[];
+  return rows.map(threadToSession);
 }
 
 // ── Projects ─────────────────────────────────────────────────────────────────
@@ -314,119 +358,159 @@ export async function getActiveSessions(): Promise<ClaudeSession[]> {
 export async function getProjects(): Promise<ProjectSummary[]> {
   const db = openDb();
   if (!db) return [];
-  try {
-    const rows = db.prepare(`
-      SELECT cwd,
-             COUNT(*) as session_count,
-             MAX(updated_at) as last_activity,
-             SUM(tokens_used) as total_tokens
-      FROM threads
-      GROUP BY cwd
-      ORDER BY last_activity DESC
-    `).all() as Array<{
-      cwd: string;
-      session_count: number;
-      last_activity: number;
-      total_tokens: number;
-    }>;
+  // Group by (cwd, model) so we can sum per-model cost correctly without
+  // losing the model dimension to a top-level SUM.
+  const rows = db.prepare(`
+    SELECT cwd,
+           model,
+           COUNT(*) as session_count,
+           MAX(updated_at) as last_activity,
+           SUM(tokens_used) as total_tokens
+    FROM threads
+    GROUP BY cwd, model
+    ORDER BY cwd, last_activity DESC
+  `).all() as Array<{
+    cwd: string;
+    model: string | null;
+    session_count: number;
+    last_activity: number;
+    total_tokens: number;
+  }>;
 
-    return rows.map((row) => {
-      const totalTokens: TokenUsage = {
-        input_tokens: Math.round((row.total_tokens || 0) * 0.3),
-        output_tokens: Math.round((row.total_tokens || 0) * 0.7),
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
+  // Fold per-(cwd,model) buckets into per-cwd summaries, pricing each bucket
+  // with its own model's rates.
+  const byCwd = new Map<string, ProjectSummary>();
+  for (const row of rows) {
+    const tokens: TokenUsage = {
+      input_tokens: Math.round((row.total_tokens || 0) * 0.3),
+      output_tokens: Math.round((row.total_tokens || 0) * 0.7),
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    };
+    const bucketCost = calculateCodexCost(tokens, row.model);
+    const existing = byCwd.get(row.cwd);
+    if (existing) {
+      existing.sessionCount += row.session_count;
+      existing.totalTokens = addTokens(existing.totalTokens, tokens);
+      if (row.last_activity * 1000 > new Date(existing.lastActivity).getTime()) {
+        existing.lastActivity = new Date(row.last_activity * 1000).toISOString();
+      }
+      existing.cost = {
+        inputCost: existing.cost.inputCost + bucketCost.inputCost,
+        outputCost: existing.cost.outputCost + bucketCost.outputCost,
+        cacheWriteCost: existing.cost.cacheWriteCost + bucketCost.cacheWriteCost,
+        cacheReadCost: existing.cost.cacheReadCost + bucketCost.cacheReadCost,
+        totalCost: existing.cost.totalCost + bucketCost.totalCost,
       };
-      return {
+    } else {
+      byCwd.set(row.cwd, {
         id: row.cwd.replace(/[\\/]/g, "-"),
         path: row.cwd,
         name: projectNameFromPath(row.cwd),
         sessionCount: row.session_count,
         lastActivity: new Date(row.last_activity * 1000).toISOString(),
-        totalTokens,
-        cost: calculateCodexCost(totalTokens),
-      };
-    });
-  } finally {
-    db.close();
+        totalTokens: tokens,
+        cost: bucketCost,
+        provider: "codex" as const,
+      });
+    }
   }
+
+  return Array.from(byCwd.values()).sort(
+    (a, b) =>
+      new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+  );
 }
 
 export async function getProjectDetail(projectId: string): Promise<ProjectDetail | null> {
   const db = openDb();
   if (!db) return null;
-  try {
-    // Decode project ID back to path
-    const decodedPath = projectId.replace(/^-/, "/").replace(/-/g, "/");
+  // Decode project ID back to path
+  const decodedPath = projectId.replace(/^-/, "/").replace(/-/g, "/");
 
-    const rows = db.prepare(
-      "SELECT * FROM threads WHERE cwd = ? ORDER BY created_at DESC"
-    ).all(decodedPath) as ThreadRow[];
+  const rows = db.prepare(
+    "SELECT * FROM threads WHERE cwd = ? ORDER BY created_at DESC"
+  ).all(decodedPath) as ThreadRow[];
 
-    if (rows.length === 0) return null;
+  if (rows.length === 0) return null;
 
-    let totalTokens = emptyTokenUsage();
-    const sessions: ProjectSession[] = [];
-    const tokenTimeSeries: TokenDataPoint[] = [];
-    let cumulativeInput = 0;
-    let cumulativeOutput = 0;
+  let totalTokens = emptyTokenUsage();
+  const sessions: ProjectSession[] = [];
+  const tokenTimeSeries: TokenDataPoint[] = [];
+  let cumulativeInput = 0;
+  let cumulativeOutput = 0;
+  let projectCost: CostEstimate = {
+    inputCost: 0,
+    outputCost: 0,
+    cacheWriteCost: 0,
+    cacheReadCost: 0,
+    totalCost: 0,
+  };
 
-    for (const row of rows) {
-      const tokens = tokensFromRow(row);
-      totalTokens = addTokens(totalTokens, tokens);
-      cumulativeInput += tokens.input_tokens;
-      cumulativeOutput += tokens.output_tokens;
-
-      sessions.push({
-        sessionId: row.id,
-        messageCount: 0, // We'd need to parse JSONL for exact count
-        totalTokens: tokens,
-        firstMessage: new Date(row.created_at * 1000).toISOString(),
-        lastMessage: new Date(row.updated_at * 1000).toISOString(),
-      });
-
-      tokenTimeSeries.push({
-        timestamp: new Date(row.created_at * 1000).toISOString(),
-        ...tokens,
-        cumulative_input: cumulativeInput,
-        cumulative_output: cumulativeOutput,
-      });
-    }
-
-    // Get subagents from thread_spawn_edges
-    const subagents: SubagentMeta[] = [];
-    const threadIds = rows.map((r) => r.id);
-    for (const threadId of threadIds) {
-      const edges = db.prepare(
-        "SELECT * FROM thread_spawn_edges WHERE parent_thread_id = ?"
-      ).all(threadId) as SpawnEdgeRow[];
-      for (const edge of edges) {
-        subagents.push({
-          agentType: "subagent",
-          description: `Child thread: ${edge.child_thread_id}`,
-          sessionId: edge.child_thread_id,
-        });
-      }
-    }
-
-    const lastActivity = Math.max(...rows.map((r) => r.updated_at));
-
-    return {
-      id: projectId,
-      path: decodedPath,
-      name: projectNameFromPath(decodedPath),
-      sessionCount: rows.length,
-      lastActivity: new Date(lastActivity * 1000).toISOString(),
-      totalTokens,
-      cost: calculateCodexCost(totalTokens),
-      sessions,
-      subagents,
-      memoryFiles: [],
-      tokenTimeSeries,
+  for (const row of rows) {
+    const tokens = tokensFromRow(row);
+    totalTokens = addTokens(totalTokens, tokens);
+    cumulativeInput += tokens.input_tokens;
+    cumulativeOutput += tokens.output_tokens;
+    const c = calculateCodexCost(tokens, row.model);
+    projectCost = {
+      inputCost: projectCost.inputCost + c.inputCost,
+      outputCost: projectCost.outputCost + c.outputCost,
+      cacheWriteCost: projectCost.cacheWriteCost + c.cacheWriteCost,
+      cacheReadCost: projectCost.cacheReadCost + c.cacheReadCost,
+      totalCost: projectCost.totalCost + c.totalCost,
     };
-  } finally {
-    db.close();
+
+    sessions.push({
+      sessionId: row.id,
+      messageCount: 0, // We'd need to parse JSONL for exact count
+      totalTokens: tokens,
+      firstMessage: new Date(row.created_at * 1000).toISOString(),
+      lastMessage: new Date(row.updated_at * 1000).toISOString(),
+    });
+
+    tokenTimeSeries.push({
+      timestamp: new Date(row.created_at * 1000).toISOString(),
+      ...tokens,
+      cumulative_input: cumulativeInput,
+      cumulative_output: cumulativeOutput,
+      provider: "codex",
+    });
   }
+
+  // Get subagents from thread_spawn_edges — one parameterised IN query
+  // instead of N separate `... WHERE parent_thread_id = ?` lookups.
+  const subagents: SubagentMeta[] = [];
+  const threadIds = rows.map((r) => r.id);
+  if (threadIds.length > 0) {
+    const placeholders = threadIds.map(() => "?").join(",");
+    const edges = db.prepare(
+      `SELECT * FROM thread_spawn_edges WHERE parent_thread_id IN (${placeholders})`
+    ).all(...threadIds) as SpawnEdgeRow[];
+    for (const edge of edges) {
+      subagents.push({
+        agentType: "subagent",
+        description: `Child thread: ${edge.child_thread_id}`,
+        sessionId: edge.child_thread_id,
+      });
+    }
+  }
+
+  const lastActivity = Math.max(...rows.map((r) => r.updated_at));
+
+  return {
+    id: projectId,
+    path: decodedPath,
+    name: projectNameFromPath(decodedPath),
+    sessionCount: rows.length,
+    lastActivity: new Date(lastActivity * 1000).toISOString(),
+    totalTokens,
+    cost: projectCost,
+    sessions,
+    subagents,
+    memoryFiles: [],
+    tokenTimeSeries,
+  };
 }
 
 // ── Session History ──────────────────────────────────────────────────────────
@@ -434,32 +518,28 @@ export async function getProjectDetail(projectId: string): Promise<ProjectDetail
 export async function getSessionHistory(): Promise<SessionHistory[]> {
   const db = openDb();
   if (!db) return [];
-  try {
-    const rows = db.prepare(
-      "SELECT * FROM threads ORDER BY updated_at DESC"
-    ).all() as ThreadRow[];
+  const rows = db.prepare(
+    "SELECT * FROM threads ORDER BY updated_at DESC"
+  ).all() as ThreadRow[];
 
-    return rows.map((row) => {
-      const tokens = tokensFromRow(row);
-      return {
-        sessionId: row.id,
-        projectName: projectNameFromPath(row.cwd),
-        cwd: row.cwd,
-        startedAt: row.created_at * 1000,
-        endedAt: row.archived ? new Date(row.updated_at * 1000).toISOString() : undefined,
-        entrypoint: row.source || "cli",
-        totalTokens: tokens,
-        cost: calculateCodexCost(tokens),
-        messageCount: 0,
-        status: row.archived
-          ? ("dead" as SessionStatus)
-          : getStatusFromRollout(row.rollout_path).status,
-        provider: "codex" as const,
-      };
-    });
-  } finally {
-    db.close();
-  }
+  return rows.map((row) => {
+    const tokens = tokensFromRow(row);
+    return {
+      sessionId: row.id,
+      projectName: projectNameFromPath(row.cwd),
+      cwd: row.cwd,
+      startedAt: row.created_at * 1000,
+      endedAt: row.archived ? new Date(row.updated_at * 1000).toISOString() : undefined,
+      entrypoint: row.source || "cli",
+      totalTokens: tokens,
+      cost: calculateCodexCost(tokens, row.model),
+      messageCount: 0,
+      status: row.archived
+        ? ("dead" as SessionStatus)
+        : getStatusFromRollout(row.rollout_path).status,
+      provider: "codex" as const,
+    };
+  });
 }
 
 // ── Token Usage ──────────────────────────────────────────────────────────────
@@ -467,87 +547,142 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
 export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> {
   const db = openDb();
   if (!db) return [];
-  try {
-    const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
-    const rows = db.prepare(`
-      SELECT date(created_at, 'unixepoch', 'localtime') as day,
-             SUM(tokens_used) as total,
-             COUNT(*) as sessions
-      FROM threads
-      WHERE created_at >= ?
-      GROUP BY day
-      ORDER BY day ASC
-    `).all(cutoff) as Array<{ day: string; total: number; sessions: number }>;
+  const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+  // Bucket by (day, model) so each model contribution is priced correctly
+  // before being collapsed into per-day totals.
+  const rows = db.prepare(`
+    SELECT date(created_at, 'unixepoch', 'localtime') as day,
+           model,
+           SUM(tokens_used) as total,
+           COUNT(*) as sessions
+    FROM threads
+    WHERE created_at >= ?
+    GROUP BY day, model
+    ORDER BY day ASC
+  `).all(cutoff) as Array<{
+    day: string;
+    model: string | null;
+    total: number;
+    sessions: number;
+  }>;
 
-    // Fill missing days
-    const result: DailyTokenUsage[] = [];
-    const now = new Date();
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split("T")[0];
-      const match = rows.find((r) => r.day === dateStr);
-      const total = match?.total || 0;
-      const tokens: TokenUsage = {
-        input_tokens: Math.round(total * 0.3),
-        output_tokens: Math.round(total * 0.7),
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-      };
+  // Aggregate per-day: tokens sum, cost is the sum of per-model bucket costs.
+  type DayAgg = { tokens: TokenUsage; totalCost: number; sessions: number };
+  const byDay = new Map<string, DayAgg>();
+  for (const row of rows) {
+    const total = row.total || 0;
+    const tokens: TokenUsage = {
+      input_tokens: Math.round(total * 0.3),
+      output_tokens: Math.round(total * 0.7),
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    };
+    const cost = calculateCodexCost(tokens, row.model).totalCost;
+    const existing = byDay.get(row.day);
+    if (existing) {
+      existing.tokens = addTokens(existing.tokens, tokens);
+      existing.totalCost += cost;
+      existing.sessions += row.sessions;
+    } else {
+      byDay.set(row.day, { tokens, totalCost: cost, sessions: row.sessions });
+    }
+  }
+
+  // Fill missing days
+  const result: DailyTokenUsage[] = [];
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const dateStr = formatLocalDate(d);
+    const match = byDay.get(dateStr);
+    if (match) {
       result.push({
         date: dateStr,
-        ...tokens,
-        totalCost: calculateCodexCost(tokens).totalCost,
-        sessionCount: match?.sessions || 0,
+        ...match.tokens,
+        totalCost: match.totalCost,
+        sessionCount: match.sessions,
+        provider: "codex",
+      });
+    } else {
+      result.push({
+        date: dateStr,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        totalCost: 0,
+        sessionCount: 0,
+        provider: "codex",
       });
     }
-    return result;
-  } finally {
-    db.close();
   }
+  return result;
 }
 
 export async function getProjectStats(): Promise<ProjectStats[]> {
   const db = openDb();
   if (!db) return [];
-  try {
-    const rows = db.prepare(`
-      SELECT cwd,
-             COUNT(*) as session_count,
-             MAX(updated_at) as last_activity,
-             SUM(tokens_used) as total_tokens
-      FROM threads
-      GROUP BY cwd
-      ORDER BY total_tokens DESC
-    `).all() as Array<{
-      cwd: string;
-      session_count: number;
-      last_activity: number;
-      total_tokens: number;
-    }>;
+  // Per-(cwd,model) breakdown lets us price each bucket at its own rate.
+  const rows = db.prepare(`
+    SELECT cwd,
+           model,
+           COUNT(*) as session_count,
+           MAX(updated_at) as last_activity,
+           SUM(tokens_used) as total_tokens
+    FROM threads
+    GROUP BY cwd, model
+    ORDER BY total_tokens DESC
+  `).all() as Array<{
+    cwd: string;
+    model: string | null;
+    session_count: number;
+    last_activity: number;
+    total_tokens: number;
+  }>;
 
-    return rows.map((row) => {
-      const tokens: TokenUsage = {
-        input_tokens: Math.round((row.total_tokens || 0) * 0.3),
-        output_tokens: Math.round((row.total_tokens || 0) * 0.7),
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
+  const byCwd = new Map<string, ProjectStats>();
+  for (const row of rows) {
+    const tokens: TokenUsage = {
+      input_tokens: Math.round((row.total_tokens || 0) * 0.3),
+      output_tokens: Math.round((row.total_tokens || 0) * 0.7),
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    };
+    const bucketCost = calculateCodexCost(tokens, row.model);
+    const existing = byCwd.get(row.cwd);
+    if (existing) {
+      existing.totalTokens = addTokens(existing.totalTokens, tokens);
+      existing.sessionCount += row.session_count;
+      existing.successCount += row.session_count;
+      existing.cost = {
+        inputCost: existing.cost.inputCost + bucketCost.inputCost,
+        outputCost: existing.cost.outputCost + bucketCost.outputCost,
+        cacheWriteCost: existing.cost.cacheWriteCost + bucketCost.cacheWriteCost,
+        cacheReadCost: existing.cost.cacheReadCost + bucketCost.cacheReadCost,
+        totalCost: existing.cost.totalCost + bucketCost.totalCost,
       };
-      return {
+      if (row.last_activity * 1000 > new Date(existing.lastActivity).getTime()) {
+        existing.lastActivity = new Date(row.last_activity * 1000).toISOString();
+      }
+    } else {
+      byCwd.set(row.cwd, {
         id: row.cwd.replace(/[\\/]/g, "-"),
         name: projectNameFromPath(row.cwd),
         totalTokens: tokens,
-        cost: calculateCodexCost(tokens),
+        cost: bucketCost,
         sessionCount: row.session_count,
         lastActivity: new Date(row.last_activity * 1000).toISOString(),
         errorCount: 0,
         successCount: row.session_count,
         errorRate: 0,
-      };
-    });
-  } finally {
-    db.close();
+        provider: "codex" as const,
+      });
+    }
   }
+  return Array.from(byCwd.values()).sort(
+    (a, b) => b.cost.totalCost - a.cost.totalCost
+  );
 }
 
 // ── Search ───────────────────────────────────────────────────────────────────
@@ -555,31 +690,27 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
 export async function searchAll(query: string): Promise<SearchResult[]> {
   const db = openDb();
   if (!db) return [];
-  try {
-    const pattern = `%${query}%`;
-    const rows = db.prepare(`
-      SELECT id, cwd, title, first_user_message
-      FROM threads
-      WHERE title LIKE ? OR first_user_message LIKE ? OR cwd LIKE ?
-      ORDER BY updated_at DESC
-      LIMIT 20
-    `).all(pattern, pattern, pattern) as Array<{
-      id: string;
-      cwd: string;
-      title: string;
-      first_user_message: string;
-    }>;
+  const pattern = `%${query}%`;
+  const rows = db.prepare(`
+    SELECT id, cwd, title, first_user_message
+    FROM threads
+    WHERE title LIKE ? OR first_user_message LIKE ? OR cwd LIKE ?
+    ORDER BY updated_at DESC
+    LIMIT 20
+  `).all(pattern, pattern, pattern) as Array<{
+    id: string;
+    cwd: string;
+    title: string;
+    first_user_message: string;
+  }>;
 
-    return rows.map((row) => ({
-      type: "session" as const,
-      title: row.title || projectNameFromPath(row.cwd),
-      subtitle: row.cwd,
-      href: `/sessions?id=${row.id}`,
-      snippet: row.first_user_message?.slice(0, 200),
-    }));
-  } finally {
-    db.close();
-  }
+  return rows.map((row) => ({
+    type: "session" as const,
+    title: row.title || projectNameFromPath(row.cwd),
+    subtitle: row.cwd,
+    href: `/sessions?id=${row.id}`,
+    snippet: row.first_user_message?.slice(0, 200),
+  }));
 }
 
 // ── Conversation ─────────────────────────────────────────────────────────────
@@ -591,22 +722,18 @@ export function findSessionJsonl(sessionId: string): string | null {
 
   const db = openDb();
   if (!db) return null;
-  try {
-    const row = db.prepare(
-      "SELECT rollout_path FROM threads WHERE id = ?"
-    ).get(sessionId) as { rollout_path: string } | undefined;
-    if (!row?.rollout_path) return null;
-    const fullPath = path.isAbsolute(row.rollout_path)
-      ? row.rollout_path
-      : path.join(CODEX_DIR, row.rollout_path);
-    // Defense-in-depth: the rollout_path comes from SQLite and, while we trust
-    // the Codex CLI to write it, we verify the resolved path stays inside
-    // ~/.codex so a corrupted/malicious DB entry cannot escape the sandbox.
-    if (!isWithinDir(fullPath, CODEX_DIR)) return null;
-    return fs.existsSync(fullPath) ? fullPath : null;
-  } finally {
-    db.close();
-  }
+  const row = db.prepare(
+    "SELECT rollout_path FROM threads WHERE id = ?"
+  ).get(sessionId) as { rollout_path: string } | undefined;
+  if (!row?.rollout_path) return null;
+  const fullPath = path.isAbsolute(row.rollout_path)
+    ? row.rollout_path
+    : path.join(CODEX_DIR, row.rollout_path);
+  // Defense-in-depth: the rollout_path comes from SQLite and, while we trust
+  // the Codex CLI to write it, we verify the resolved path stays inside
+  // ~/.codex so a corrupted/malicious DB entry cannot escape the sandbox.
+  if (!isWithinDir(fullPath, CODEX_DIR)) return null;
+  return fs.existsSync(fullPath) ? fullPath : null;
 }
 
 export async function readConversationLines(filePath: string, n: number): Promise<string[]> {
@@ -800,13 +927,16 @@ export async function getOverview(): Promise<DashboardOverview> {
 
   let totalTokensToday = emptyTokenUsage();
   let totalTokensMonth = emptyTokenUsage();
+  // Cost sums up the (already model-aware) per-day cost from getDailyTokenUsage
+  // so a month spanning multiple models is priced correctly.
+  let monthCostTotal = 0;
 
   // Aggregate from daily token data
   const dailyData = await getDailyTokenUsage(30);
-  const today = new Date().toISOString().split("T")[0];
+  const today = formatLocalDate(new Date());
   const monthStart = new Date();
   monthStart.setDate(1);
-  const monthStartStr = monthStart.toISOString().split("T")[0];
+  const monthStartStr = formatLocalDate(monthStart);
 
   for (const day of dailyData) {
     const dayTokens: TokenUsage = {
@@ -820,6 +950,7 @@ export async function getOverview(): Promise<DashboardOverview> {
     }
     if (day.date >= monthStartStr) {
       totalTokensMonth = addTokens(totalTokensMonth, dayTokens);
+      monthCostTotal += day.totalCost;
     }
   }
 
@@ -843,7 +974,13 @@ export async function getOverview(): Promise<DashboardOverview> {
     awaitingInput,
     totalTokensToday,
     totalTokensMonth,
-    totalCost: calculateCodexCost(totalTokensMonth),
+    totalCost: {
+      inputCost: 0,
+      outputCost: 0,
+      cacheWriteCost: 0,
+      cacheReadCost: 0,
+      totalCost: monthCostTotal,
+    },
     activeProjects: activeProjectCount,
     scheduledTasks: tasks.length,
     recentSessions: aliveSessions.slice(0, 5),

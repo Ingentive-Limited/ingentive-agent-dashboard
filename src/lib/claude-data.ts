@@ -30,25 +30,176 @@ import {
   isPidAlive,
   isWithinDir,
   readLastLines,
+  readIncrementalLines,
   cronToHuman,
   projectNameFromPath,
   calculateCost,
 } from "./utils-server";
+import { pricingForModel } from "./pricing";
 
-// Anthropic pricing per million tokens (Sonnet 4 as default)
-const PRICING = {
-  input: 3.0 / 1_000_000,
-  output: 15.0 / 1_000_000,
-  cacheWrite: 3.75 / 1_000_000,
-  cacheRead: 0.30 / 1_000_000,
-};
-
-function calculateClaudeCost(tokens: TokenUsage): CostEstimate {
-  return calculateCost(tokens, PRICING);
+/**
+ * Compute cost for a Claude Code session using the model-aware pricing table.
+ * Falls back to Sonnet 4 rates when the model isn't known (older JSONLs or
+ * empty files), matching the previously hardcoded behaviour.
+ */
+function calculateClaudeCost(
+  tokens: TokenUsage,
+  model?: string | null
+): CostEstimate {
+  return calculateCost(tokens, pricingForModel(model, "claude"));
 }
 
 const IS_WIN = process.platform === "win32";
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
+
+// ── Per-file JSONL caches ────────────────────────────────────────────────────
+//
+// JSONL transcript files grow monotonically (entries are only appended), so
+// any derived value can be cached and invalidated when the file's mtime or
+// size changes. We key by both mtime and size together because rapid writes
+// can land within the same millisecond (mtime collision) but the size will
+// still differ. The same pattern is used in cowork-data.ts (tokensFromAudit).
+//
+// The dashboard polls /api/overview, /api/tokens/daily, and /api/history
+// every few seconds; without these caches every poll fully re-parses every
+// JSONL file in the projects tree.
+
+interface TokenTimelineEntry {
+  timestamp: string;
+  usage: TokenUsage;
+}
+
+interface CachedTimeline {
+  mtimeMs: number;
+  size: number;
+  /** Parsed assistant-turn usage entries from the tail of the file (last ~100 lines). */
+  entries: TokenTimelineEntry[];
+  /** Last `model` seen on an assistant turn in the scanned tail (or null). */
+  model: string | null;
+}
+
+interface CachedHistory {
+  mtimeMs: number;
+  size: number;
+  totalTokens: TokenUsage;
+  messageCount: number;
+  firstTimestamp: string;
+  lastTimestamp: string;
+  /** Last `model` seen on an assistant turn in the scanned tail (or null). */
+  model: string | null;
+}
+
+interface CachedDailyTokens {
+  mtimeMs: number;
+  size: number;
+  /** Tokens contributed by this file, bucketed by local date key (YYYY-MM-DD). */
+  byDate: Map<string, TokenUsage>;
+  /** Session ID derived from the filename — included so dailyMap can dedupe sessions per day. */
+  sessionId: string;
+  /** Last `model` seen on an assistant turn (or null) — used for per-file cost pricing. */
+  model: string | null;
+}
+
+const timelineCache = new Map<string, CachedTimeline>();
+const historyCache = new Map<string, CachedHistory>();
+const dailyTokensCache = new Map<string, CachedDailyTokens>();
+
+/**
+ * Read the tail of a JSONL transcript and return parsed assistant usage
+ * entries (timestamp + usage). Cached per file by mtime+size.
+ *
+ * `lineCount` controls how many trailing lines we scan; results are cached
+ * keyed by file path alone — a caller that wants more lines than a previous
+ * caller will still get the cached (shorter) tail rather than rereading.
+ * In practice both `getProjects` and `getOverview` read the last 100 lines,
+ * so this is fine; if that ever changes we can include `lineCount` in the
+ * cache key.
+ */
+async function readTokenTimeline(
+  filePath: string,
+  lineCount = 100
+): Promise<{ entries: TokenTimelineEntry[]; model: string | null }> {
+  const cached = timelineCache.get(filePath);
+  const cachedSize = cached?.size ?? 0;
+  const cachedMtimeMs = cached?.mtimeMs ?? 0;
+
+  let inc;
+  try {
+    inc = await readIncrementalLines(filePath, cachedSize, cachedMtimeMs);
+  } catch {
+    return cached
+      ? { entries: cached.entries, model: cached.model }
+      : { entries: [], model: null };
+  }
+
+  if (
+    cached &&
+    !inc.fullReparse &&
+    inc.newLines.length === 0 &&
+    inc.currentSize === cachedSize &&
+    inc.currentMtimeMs === cachedMtimeMs
+  ) {
+    return { entries: cached.entries, model: cached.model };
+  }
+
+  // Helper: parse JSONL lines into timeline entries.
+  const parse = (
+    lines: string[]
+  ): { entries: TokenTimelineEntry[]; model: string | null } => {
+    const out: TokenTimelineEntry[] = [];
+    let model: string | null = null;
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type !== "assistant" || !entry.message?.usage || !entry.timestamp) continue;
+        const u = entry.message.usage;
+        out.push({
+          timestamp: entry.timestamp,
+          usage: {
+            input_tokens: u.input_tokens || 0,
+            output_tokens: u.output_tokens || 0,
+            cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+            cache_read_input_tokens: u.cache_read_input_tokens || 0,
+          },
+        });
+        const m = entry.message?.model;
+        if (typeof m === "string" && m.trim()) model = m;
+      } catch {
+        // skip
+      }
+    }
+    return { entries: out, model };
+  };
+
+  let entries: TokenTimelineEntry[];
+  let lastModel: string | null;
+  if (inc.fullReparse || !cached) {
+    try {
+      const lines = await readLastLines(filePath, lineCount);
+      const parsed = parse(lines);
+      entries = parsed.entries;
+      lastModel = parsed.model;
+    } catch {
+      entries = [];
+      lastModel = null;
+    }
+  } else {
+    const parsed = parse(inc.newLines);
+    // Append the new entries to the cached tail; keep the bounded tail length
+    // so the cache doesn't grow without limit on long-running sessions.
+    const combined = cached.entries.concat(parsed.entries);
+    entries = combined.length > lineCount ? combined.slice(-lineCount) : combined;
+    lastModel = parsed.model ?? cached.model;
+  }
+
+  timelineCache.set(filePath, {
+    mtimeMs: inc.currentMtimeMs,
+    size: inc.currentSize,
+    entries,
+    model: lastModel,
+  });
+  return { entries, model: lastModel };
+}
 
 /**
  * Get the Claude Desktop app data directory (platform-specific).
@@ -77,59 +228,75 @@ async function buildProjectPathCache(): Promise<Map<string, string>> {
   if (projectPathCache && projectPathCacheTime && Date.now() - projectPathCacheTime < 30000) {
     return projectPathCache;
   }
-  projectPathCache = new Map();
-  projectPathCacheTime = Date.now();
+  const cache = new Map<string, string>();
 
-  // Read all session files to get real cwds
+  // Read all session files in parallel to get real cwds. Sequential awaits
+  // here were a noticeable cold-start cost on machines with hundreds of
+  // historic sessions.
   const sessionsDir = path.join(CLAUDE_DIR, "sessions");
   if (fs.existsSync(sessionsDir)) {
     const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
-    for (const file of files) {
-      try {
-        const content = await fs.promises.readFile(
-          path.join(sessionsDir, file),
-          "utf-8"
-        );
-        const data = JSON.parse(content);
-        if (data.cwd) {
-          // Encode path: replace both / and \ with -
-          const encoded = data.cwd.replace(/[\\/]/g, "-");
-          projectPathCache.set(encoded, data.cwd);
-        }
-      } catch {
-        // skip
-      }
-    }
-  }
-
-  // Also scan JSONL files for session cwds
-  const projectsDir = path.join(CLAUDE_DIR, "projects");
-  if (fs.existsSync(projectsDir)) {
-    const dirs = fs.readdirSync(projectsDir);
-    for (const dir of dirs) {
-      if (projectPathCache.has(dir)) continue;
-      const projectPath = path.join(projectsDir, dir);
-      const jsonlFiles = fs.readdirSync(projectPath).filter((f) => f.endsWith(".jsonl"));
-      if (jsonlFiles.length > 0) {
+    const sessionCwds = await Promise.all(
+      files.map(async (file) => {
         try {
-          const firstLine = (await fs.promises.readFile(
-            path.join(projectPath, jsonlFiles[0]),
+          const content = await fs.promises.readFile(
+            path.join(sessionsDir, file),
             "utf-8"
-          )).split("\n").find((l) => l.includes('"cwd"'));
-          if (firstLine) {
-            const entry = JSON.parse(firstLine);
-            if (entry.cwd) {
-              projectPathCache.set(dir, entry.cwd);
-            }
+          );
+          const data = JSON.parse(content);
+          if (typeof data.cwd === "string" && data.cwd) {
+            return data.cwd as string;
           }
         } catch {
           // skip
         }
-      }
+        return null;
+      })
+    );
+    for (const cwd of sessionCwds) {
+      if (!cwd) continue;
+      // Encode path: replace both / and \ with -
+      const encoded = cwd.replace(/[\\/]/g, "-");
+      cache.set(encoded, cwd);
     }
   }
 
-  return projectPathCache;
+  // Also scan JSONL files for session cwds. Read every directory's first
+  // JSONL line in parallel rather than awaiting one at a time.
+  const projectsDir = path.join(CLAUDE_DIR, "projects");
+  if (fs.existsSync(projectsDir)) {
+    const dirs = fs.readdirSync(projectsDir).filter((d) => !cache.has(d));
+    const dirCwds = await Promise.all(
+      dirs.map(async (dir) => {
+        const projectPath = path.join(projectsDir, dir);
+        try {
+          const jsonlFiles = (await fs.promises.readdir(projectPath)).filter((f) =>
+            f.endsWith(".jsonl")
+          );
+          if (jsonlFiles.length === 0) return null;
+          const content = await fs.promises.readFile(
+            path.join(projectPath, jsonlFiles[0]),
+            "utf-8"
+          );
+          const firstLine = content.split("\n").find((l) => l.includes('"cwd"'));
+          if (!firstLine) return null;
+          const entry = JSON.parse(firstLine);
+          return typeof entry.cwd === "string" && entry.cwd
+            ? ({ dir, cwd: entry.cwd as string })
+            : null;
+        } catch {
+          return null;
+        }
+      })
+    );
+    for (const result of dirCwds) {
+      if (result) cache.set(result.dir, result.cwd);
+    }
+  }
+
+  projectPathCache = cache;
+  projectPathCacheTime = Date.now();
+  return cache;
 }
 
 function decodeProjectPath(dirName: string): string {
@@ -326,36 +493,21 @@ export async function getProjects(): Promise<ProjectSummary[]> {
       }
     }
 
-    // Light token scan: read last 50 lines of most recent jsonl
+    // Light token scan: read last 100 lines of most recent jsonl. Uses the
+    // shared timeline cache so getOverview can reuse the same parsed entries.
+    let projectModel: string | null = null;
     if (fileStats.length > 0) {
       const sortedFiles = fileStats
         .map((f) => ({ name: f.name, mtime: f.mtime.getTime() }))
         .sort((a, b) => b.mtime - a.mtime);
 
-      try {
-        const lastLines = await readLastLines(
-          path.join(projectPath, sortedFiles[0].name),
-          100
-        );
-        for (const line of lastLines) {
-          try {
-            const entry = JSON.parse(line);
-            if (entry.type === "assistant" && entry.message?.usage) {
-              const u = entry.message.usage;
-              totalTokens = addTokens(totalTokens, {
-                input_tokens: u.input_tokens || 0,
-                output_tokens: u.output_tokens || 0,
-                cache_creation_input_tokens:
-                  u.cache_creation_input_tokens || 0,
-                cache_read_input_tokens: u.cache_read_input_tokens || 0,
-              });
-            }
-          } catch {
-            // skip invalid lines
-          }
-        }
-      } catch {
-        // file read error
+      const { entries, model } = await readTokenTimeline(
+        path.join(projectPath, sortedFiles[0].name),
+        100
+      );
+      projectModel = model;
+      for (const e of entries) {
+        totalTokens = addTokens(totalTokens, e.usage);
       }
     }
 
@@ -368,7 +520,8 @@ export async function getProjects(): Promise<ProjectSummary[]> {
       sessionCount: jsonlFiles.length,
       lastActivity,
       totalTokens,
-      cost: calculateClaudeCost(totalTokens),
+      cost: calculateClaudeCost(totalTokens, projectModel),
+      provider: "claude",
     });
   }
 
@@ -399,6 +552,14 @@ export async function getProjectDetail(
   const tokenTimeSeries: TokenDataPoint[] = [];
   let cumulativeInput = 0;
   let cumulativeOutput = 0;
+  // Per-session cost is summed so the project total reflects mixed-model use.
+  let projectCost: CostEstimate = {
+    inputCost: 0,
+    outputCost: 0,
+    cacheWriteCost: 0,
+    cacheReadCost: 0,
+    totalCost: 0,
+  };
 
   for (const jsonl of jsonlFiles) {
     const sessionId = jsonl.replace(".jsonl", "");
@@ -407,6 +568,7 @@ export async function getProjectDetail(
     let sessionTokens = emptyTokenUsage();
     let firstMessage = "";
     let lastMessage = "";
+    let sessionModel: string | null = null;
 
     const fileStream = fs.createReadStream(filePath);
     const rl = readline.createInterface({ input: fileStream });
@@ -434,12 +596,15 @@ export async function getProjectDetail(
           sessionTokens = addTokens(sessionTokens, usage);
           cumulativeInput += usage.input_tokens;
           cumulativeOutput += usage.output_tokens;
+          const m = entry.message?.model;
+          if (typeof m === "string" && m.trim()) sessionModel = m;
 
           tokenTimeSeries.push({
             timestamp: entry.timestamp,
             ...usage,
             cumulative_input: cumulativeInput,
             cumulative_output: cumulativeOutput,
+            provider: "claude",
           });
         }
       } catch {
@@ -448,6 +613,14 @@ export async function getProjectDetail(
     }
 
     totalTokens = addTokens(totalTokens, sessionTokens);
+    const sessionCost = calculateClaudeCost(sessionTokens, sessionModel);
+    projectCost = {
+      inputCost: projectCost.inputCost + sessionCost.inputCost,
+      outputCost: projectCost.outputCost + sessionCost.outputCost,
+      cacheWriteCost: projectCost.cacheWriteCost + sessionCost.cacheWriteCost,
+      cacheReadCost: projectCost.cacheReadCost + sessionCost.cacheReadCost,
+      totalCost: projectCost.totalCost + sessionCost.totalCost,
+    };
     projectSessions.push({
       sessionId,
       messageCount,
@@ -504,7 +677,7 @@ export async function getProjectDetail(
     sessionCount: jsonlFiles.length,
     lastActivity,
     totalTokens,
-    cost: calculateClaudeCost(totalTokens),
+    cost: projectCost,
     sessions: projectSessions,
     subagents,
     memoryFiles,
@@ -698,72 +871,94 @@ export async function getScheduledTasks(): Promise<ScheduledTask[]> {
 }
 
 export async function getOverview(): Promise<DashboardOverview> {
-  const sessions = await getActiveSessions();
+  // Run the three independent fetches in parallel — sessions, projects, and
+  // scheduled tasks don't share inputs, and serializing them was wasted wall
+  // time on every dashboard poll.
+  const [sessions, projects, tasks] = await Promise.all([
+    getActiveSessions(),
+    getProjects(),
+    getScheduledTasks(),
+  ]);
   const aliveSessions = sessions.filter((s) => s.isAlive);
   const awaitingInput = aliveSessions.filter(
     (s) => s.status === "awaiting_input" || s.status === "needs_attention"
   );
-  const projects = await getProjects();
-  const tasks = await getScheduledTasks();
 
-  // Aggregate tokens from all projects
+  // Aggregate tokens from all projects, and sum the already model-aware
+  // per-project costs so the dashboard tile prices mixed-model use correctly.
   let todayTokens = emptyTokenUsage();
+  let aggregateCost: CostEstimate = {
+    inputCost: 0,
+    outputCost: 0,
+    cacheWriteCost: 0,
+    cacheReadCost: 0,
+    totalCost: 0,
+  };
 
   for (const proj of projects) {
     todayTokens = addTokens(todayTokens, proj.totalTokens);
+    aggregateCost = {
+      inputCost: aggregateCost.inputCost + proj.cost.inputCost,
+      outputCost: aggregateCost.outputCost + proj.cost.outputCost,
+      cacheWriteCost: aggregateCost.cacheWriteCost + proj.cost.cacheWriteCost,
+      cacheReadCost: aggregateCost.cacheReadCost + proj.cost.cacheReadCost,
+      totalCost: aggregateCost.totalCost + proj.cost.totalCost,
+    };
   }
 
-  // Build a simple time series from recent project data
+  // Build a simple time series from recent project data. We re-derive the
+  // most recent JSONL per project using readdir+stat in parallel, then read
+  // each file via readTokenTimeline — which is cached by mtime+size, so when
+  // getProjects already scanned the same file (it does, for the most-recent
+  // jsonl) the entries come back from memory rather than re-parsing.
   const tokenTimeSeries: TokenDataPoint[] = [];
   const projectsDir = path.join(CLAUDE_DIR, "projects");
   if (fs.existsSync(projectsDir)) {
-    const dirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
-    // Read last 50 lines from the 3 most recent projects for dashboard chart
     const recentProjects = projects.slice(0, 3);
-    for (const proj of recentProjects) {
-      const projPath = path.join(projectsDir, proj.id);
-      try {
-        const files = await fs.promises.readdir(projPath);
-        const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"));
-        if (jsonlFiles.length === 0) continue;
-        // Get most recent file
-        let latestFile = jsonlFiles[0];
-        let latestMtime = 0;
-        for (const f of jsonlFiles) {
-          const stat = await fs.promises.stat(path.join(projPath, f));
-          if (stat.mtimeMs > latestMtime) {
-            latestMtime = stat.mtimeMs;
-            latestFile = f;
-          }
+    const latestFiles = await Promise.all(
+      recentProjects.map(async (proj) => {
+        const projPath = path.join(projectsDir, proj.id);
+        try {
+          const files = await fs.promises.readdir(projPath);
+          const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"));
+          if (jsonlFiles.length === 0) return null;
+          // Stat all candidates in parallel to find the most recent.
+          const stats = await Promise.all(
+            jsonlFiles.map(async (f) => ({
+              name: f,
+              mtimeMs: (await fs.promises.stat(path.join(projPath, f))).mtimeMs,
+            }))
+          );
+          stats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+          return path.join(projPath, stats[0].name);
+        } catch {
+          return null;
         }
-        const lines = await readLastLines(path.join(projPath, latestFile), 100);
-        let cumIn = 0, cumOut = 0;
-        for (const line of lines) {
-          try {
-            const entry = JSON.parse(line);
-            if (entry.type === "assistant" && entry.message?.usage && entry.timestamp) {
-              const u = entry.message.usage;
-              const usage: TokenUsage = {
-                input_tokens: u.input_tokens || 0,
-                output_tokens: u.output_tokens || 0,
-                cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
-                cache_read_input_tokens: u.cache_read_input_tokens || 0,
-              };
-              cumIn += usage.input_tokens;
-              cumOut += usage.output_tokens;
-              tokenTimeSeries.push({
-                timestamp: entry.timestamp,
-                ...usage,
-                cumulative_input: cumIn,
-                cumulative_output: cumOut,
-              });
-            }
-          } catch { /* skip */ }
-        }
-      } catch { /* skip */ }
+      })
+    );
+
+    // Read timelines in parallel; the cache makes repeats cheap.
+    const timelines = await Promise.all(
+      latestFiles.map((fp) =>
+        fp ? readTokenTimeline(fp, 100) : Promise.resolve({ entries: [], model: null })
+      )
+    );
+
+    for (const t of timelines) {
+      let cumIn = 0;
+      let cumOut = 0;
+      for (const e of t.entries) {
+        cumIn += e.usage.input_tokens;
+        cumOut += e.usage.output_tokens;
+        tokenTimeSeries.push({
+          timestamp: e.timestamp,
+          ...e.usage,
+          cumulative_input: cumIn,
+          cumulative_output: cumOut,
+          provider: "claude",
+        });
+      }
     }
-    // suppress unused var
-    void dirs;
   }
 
   tokenTimeSeries.sort((a, b) =>
@@ -793,7 +988,7 @@ export async function getOverview(): Promise<DashboardOverview> {
     awaitingInput: awaitingInput.length,
     totalTokensToday: todayTokens,
     totalTokensMonth: monthlyTokens,
-    totalCost: calculateClaudeCost(todayTokens),
+    totalCost: aggregateCost,
     activeProjects: projects.filter((p) => {
       return (
         p.lastActivity &&
@@ -818,26 +1013,79 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
   const history: SessionHistory[] = [];
   const dirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
 
+  // Collect every (jsonl, projectDir) pair, then read in parallel. The
+  // dashboard's history page lists ~hundreds of JSONLs; the per-file cache
+  // below makes the second poll near-instant, and parallelizing the cold
+  // case removes the serial-await bottleneck.
+  type JsonlRef = { sessionId: string; filePath: string; dirName: string };
+  const refs: JsonlRef[] = [];
   for (const dir of dirs) {
     if (!dir.isDirectory()) continue;
     const projPath = path.join(projectsDir, dir.name);
-    const files = await fs.promises.readdir(projPath);
-    const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"));
-    const realPath = pathCache.get(dir.name) || decodeProjectPath(dir.name);
+    let files: string[];
+    try {
+      files = await fs.promises.readdir(projPath);
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      if (!f.endsWith(".jsonl")) continue;
+      refs.push({
+        sessionId: f.replace(".jsonl", ""),
+        filePath: path.join(projPath, f),
+        dirName: dir.name,
+      });
+    }
+  }
 
-    for (const jsonl of jsonlFiles) {
-      const sessionId = jsonl.replace(".jsonl", "");
-      const filePath = path.join(projPath, jsonl);
-      const stat = await fs.promises.stat(filePath);
-      let totalTokens = emptyTokenUsage();
-      let messageCount = 0;
-      let firstTimestamp = "";
-      let lastTimestamp = "";
-
-      // Read first and last lines for timestamps, scan for tokens
+  const items = await Promise.all(
+    refs.map(async (ref) => {
+      let stat: fs.Stats;
       try {
-        const lines = await readLastLines(filePath, 50);
-        for (const line of lines) {
+        stat = await fs.promises.stat(ref.filePath);
+      } catch {
+        return null;
+      }
+
+      let totalTokens: TokenUsage;
+      let messageCount: number;
+      let firstTimestamp: string;
+      let lastTimestamp: string;
+      let sessionModel: string | null;
+
+      const cached = historyCache.get(ref.filePath);
+      const cachedSize = cached?.size ?? 0;
+      const cachedMtimeMs = cached?.mtimeMs ?? 0;
+
+      let inc;
+      try {
+        inc = await readIncrementalLines(ref.filePath, cachedSize, cachedMtimeMs);
+      } catch {
+        inc = null;
+      }
+
+      if (
+        cached &&
+        inc &&
+        !inc.fullReparse &&
+        inc.newLines.length === 0 &&
+        inc.currentSize === cachedSize &&
+        inc.currentMtimeMs === cachedMtimeMs
+      ) {
+        totalTokens = cached.totalTokens;
+        messageCount = cached.messageCount;
+        firstTimestamp = cached.firstTimestamp;
+        lastTimestamp = cached.lastTimestamp;
+        sessionModel = cached.model;
+      } else if (cached && inc && !inc.fullReparse) {
+        // Incremental: fold new lines into the cached aggregate. firstTimestamp
+        // stays fixed; lastTimestamp + totals + model + count grow.
+        totalTokens = cached.totalTokens;
+        messageCount = cached.messageCount;
+        firstTimestamp = cached.firstTimestamp;
+        lastTimestamp = cached.lastTimestamp;
+        sessionModel = cached.model;
+        for (const line of inc.newLines) {
           try {
             const entry = JSON.parse(line);
             if (entry.timestamp) {
@@ -853,28 +1101,85 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
                 cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
                 cache_read_input_tokens: u.cache_read_input_tokens || 0,
               });
+              const m = entry.message?.model;
+              if (typeof m === "string" && m.trim()) sessionModel = m;
             }
           } catch { /* skip */ }
         }
-      } catch { /* skip */ }
+        historyCache.set(ref.filePath, {
+          mtimeMs: inc.currentMtimeMs,
+          size: inc.currentSize,
+          totalTokens,
+          messageCount,
+          firstTimestamp,
+          lastTimestamp,
+          model: sessionModel,
+        });
+      } else {
+        // Full reparse: first read, rotation, or rewrite.
+        totalTokens = emptyTokenUsage();
+        messageCount = 0;
+        firstTimestamp = "";
+        lastTimestamp = "";
+        sessionModel = null;
+        try {
+          const lines = await readLastLines(ref.filePath, 50);
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line);
+              if (entry.timestamp) {
+                if (!firstTimestamp) firstTimestamp = entry.timestamp;
+                lastTimestamp = entry.timestamp;
+              }
+              if (entry.type === "assistant" && entry.message?.usage) {
+                messageCount++;
+                const u = entry.message.usage;
+                totalTokens = addTokens(totalTokens, {
+                  input_tokens: u.input_tokens || 0,
+                  output_tokens: u.output_tokens || 0,
+                  cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+                  cache_read_input_tokens: u.cache_read_input_tokens || 0,
+                });
+                const m = entry.message?.model;
+                if (typeof m === "string" && m.trim()) sessionModel = m;
+              }
+            } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+        historyCache.set(ref.filePath, {
+          mtimeMs: inc?.currentMtimeMs ?? stat.mtimeMs,
+          size: inc?.currentSize ?? stat.size,
+          totalTokens,
+          messageCount,
+          firstTimestamp,
+          lastTimestamp,
+          model: sessionModel,
+        });
+      }
 
-      // Find matching active session for metadata
-      const active = activeSessions.find((s) => s.sessionId === sessionId);
+      const realPath = pathCache.get(ref.dirName) || decodeProjectPath(ref.dirName);
+      const active = activeSessions.find((s) => s.sessionId === ref.sessionId);
 
-      history.push({
-        sessionId,
+      return {
+        sessionId: ref.sessionId,
         projectName: active?.projectName || projectNameFromPath(realPath),
         cwd: active?.cwd || realPath,
         startedAt: active?.startedAt || stat.birthtimeMs,
-        endedAt: aliveIds.has(sessionId) ? undefined : lastTimestamp || stat.mtime.toISOString(),
+        endedAt: aliveIds.has(ref.sessionId)
+          ? undefined
+          : lastTimestamp || stat.mtime.toISOString(),
         entrypoint: active?.entrypoint || "cli",
         totalTokens,
-        cost: calculateClaudeCost(totalTokens),
+        cost: calculateClaudeCost(totalTokens, sessionModel),
         messageCount,
-        status: active?.status || (aliveIds.has(sessionId) ? "running" : "dead"),
-        provider: "claude",
-      });
-    }
+        status: active?.status || (aliveIds.has(ref.sessionId) ? "running" : "dead"),
+        provider: "claude" as const,
+      } as SessionHistory;
+    })
+  );
+
+  for (const item of items) {
+    if (item) history.push(item);
   }
 
   return history.sort((a, b) => b.startedAt - a.startedAt);
@@ -967,6 +1272,11 @@ export async function searchAll(query: string): Promise<SearchResult[]> {
   const q = query.toLowerCase();
   const results: SearchResult[] = [];
 
+  // Build the project-path cache once up front. Previously this was awaited
+  // inside the conversation-content inner loop, which meant we paid the
+  // (cached but still non-zero) lookup cost per matching line.
+  const pathCache = await buildProjectPathCache();
+
   // Search projects
   const projects = await getProjects();
   for (const proj of projects) {
@@ -1030,7 +1340,6 @@ export async function searchAll(query: string): Promise<SearchResult[]> {
                   const start = Math.max(0, idx - 40);
                   const end = Math.min(text.length, idx + q.length + 40);
                   const snippet = (start > 0 ? "..." : "") + text.slice(start, end) + (end < text.length ? "..." : "");
-                  const pathCache = await buildProjectPathCache();
                   const realPath = pathCache.get(dir.name) || decodeProjectPath(dir.name);
                   results.push({
                     type: "conversation",
@@ -1098,56 +1407,166 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
   cutoff.setHours(0, 0, 0, 0);
   const cutoffMs = cutoff.getTime();
 
-  const dailyMap = new Map<string, { tokens: TokenUsage; sessions: Set<string> }>();
+  // Per-day aggregation. `cost` accumulates the (model-aware) cost
+  // contribution of each session-day, so a day spanning Opus and Sonnet
+  // sessions is priced correctly without averaging.
+  const dailyMap = new Map<
+    string,
+    { tokens: TokenUsage; sessions: Set<string>; cost: number }
+  >();
 
   const allDirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
   const dirs = allDirs.filter((d) => d.isDirectory());
 
+  // Collect every JSONL path first, then process them in parallel. The
+  // previous implementation awaited each full-file scan sequentially, which
+  // dominated the cold-path latency (~1.2s per poll on a 192-file tree).
+  type JsonlRef = { sessionId: string; filePath: string };
+  const refs: JsonlRef[] = [];
   for (const dir of dirs) {
     const projPath = path.join(projectsDir, dir.name);
     let files: string[];
     try {
       files = (await fs.promises.readdir(projPath)).filter((f) => f.endsWith(".jsonl"));
     } catch { continue; }
+    for (const f of files) {
+      refs.push({
+        sessionId: f.replace(".jsonl", ""),
+        filePath: path.join(projPath, f),
+      });
+    }
+  }
 
-    // Only read files modified within the window
-    for (const file of files) {
-      const filePath = path.join(projPath, file);
+  // Per-file cache: each file's tokens-by-date map is keyed by mtime+size.
+  // Because JSONL files only ever grow (entries are appended), when neither
+  // changed we can skip the full-file parse entirely and just re-merge the
+  // cached buckets into the day map. Mtime alone can collide on writes that
+  // land within the same millisecond, so we key on both.
+  const perFileResults = await Promise.all(
+    refs.map(async (ref) => {
+      let stat: fs.Stats;
       try {
-        const stat = await fs.promises.stat(filePath);
-        if (stat.mtimeMs < cutoffMs) continue;
+        stat = await fs.promises.stat(ref.filePath);
+      } catch {
+        return null;
+      }
+      if (stat.mtimeMs < cutoffMs) return null;
 
-        const sessionId = file.replace(".jsonl", "");
-        const stream = fs.createReadStream(filePath, { encoding: "utf-8" });
-        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      const cached = dailyTokensCache.get(ref.filePath);
+      const cachedSize = cached?.size ?? 0;
+      const cachedMtimeMs = cached?.mtimeMs ?? 0;
 
-        for await (const line of rl) {
-          if (!line.trim()) continue;
-          try {
-            const entry = JSON.parse(line);
-            if (entry.type !== "assistant" || !entry.message?.usage || !entry.timestamp) continue;
+      let inc;
+      try {
+        inc = await readIncrementalLines(ref.filePath, cachedSize, cachedMtimeMs);
+      } catch {
+        inc = null;
+      }
 
-            const ts = new Date(entry.timestamp);
-            if (ts.getTime() < cutoffMs) continue;
+      // Unchanged → return cached as-is.
+      if (
+        cached &&
+        inc &&
+        !inc.fullReparse &&
+        inc.newLines.length === 0 &&
+        inc.currentSize === cachedSize &&
+        inc.currentMtimeMs === cachedMtimeMs
+      ) {
+        return cached;
+      }
 
-            // Use local date to match the fill loop which uses local midnight
-            const dateKey = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, "0")}-${String(ts.getDate()).padStart(2, "0")}`;
-            const u = entry.message.usage;
-
-            if (!dailyMap.has(dateKey)) {
-              dailyMap.set(dateKey, { tokens: emptyTokenUsage(), sessions: new Set() });
-            }
-            const day = dailyMap.get(dateKey)!;
-            day.tokens = addTokens(day.tokens, {
+      // Helper: process a stream of lines into a byDate map + last model.
+      // Used by both the incremental path (over `newLines`) and the full
+      // re-scan path (over a readline stream).
+      const addLineToByDate = (
+        line: string,
+        byDate: Map<string, TokenUsage>,
+        prevModel: string | null
+      ): string | null => {
+        if (!line.trim()) return prevModel;
+        try {
+          const entry = JSON.parse(line);
+          if (entry.type !== "assistant" || !entry.message?.usage || !entry.timestamp) return prevModel;
+          const ts = new Date(entry.timestamp);
+          if (ts.getTime() < cutoffMs) return prevModel;
+          const dateKey = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, "0")}-${String(ts.getDate()).padStart(2, "0")}`;
+          const u = entry.message.usage;
+          byDate.set(
+            dateKey,
+            addTokens(byDate.get(dateKey) ?? emptyTokenUsage(), {
               input_tokens: u.input_tokens || 0,
               output_tokens: u.output_tokens || 0,
               cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
               cache_read_input_tokens: u.cache_read_input_tokens || 0,
-            });
-            day.sessions.add(sessionId);
-          } catch { /* skip */ }
+            })
+          );
+          const m = entry.message?.model;
+          if (typeof m === "string" && m.trim()) return m;
+        } catch { /* skip */ }
+        return prevModel;
+      };
+
+      let byDate: Map<string, TokenUsage>;
+      let fileModel: string | null;
+
+      if (cached && inc && !inc.fullReparse) {
+        // Incremental: clone the cached byDate so we don't mutate the shared
+        // instance (it is returned and merged into dailyMap downstream), then
+        // fold in tokens from new lines only.
+        byDate = new Map(cached.byDate);
+        fileModel = cached.model;
+        for (const line of inc.newLines) {
+          fileModel = addLineToByDate(line, byDate, fileModel);
         }
-      } catch { /* skip */ }
+      } else {
+        // Full re-scan: rotation, first read, or rewrite.
+        byDate = new Map<string, TokenUsage>();
+        fileModel = null;
+        try {
+          const stream = fs.createReadStream(ref.filePath, { encoding: "utf-8" });
+          const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+          for await (const line of rl) {
+            fileModel = addLineToByDate(line, byDate, fileModel);
+          }
+        } catch {
+          // file read error
+        }
+      }
+
+      const fresh: CachedDailyTokens = {
+        mtimeMs: inc?.currentMtimeMs ?? stat.mtimeMs,
+        size: inc?.currentSize ?? stat.size,
+        byDate,
+        sessionId: ref.sessionId,
+        model: fileModel,
+      };
+      dailyTokensCache.set(ref.filePath, fresh);
+      return fresh;
+    })
+  );
+
+  for (const result of perFileResults) {
+    if (!result) continue;
+    for (const [dateKey, tokens] of result.byDate.entries()) {
+      // Older days that the cached file still references but that now fall
+      // outside the requested window should be ignored. Compare by string —
+      // dateKey is YYYY-MM-DD local, so we can rebuild the cutoff in that
+      // shape for cheap lexicographic comparison.
+      const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+      if (dateKey < cutoffKey) continue;
+      if (!dailyMap.has(dateKey)) {
+        dailyMap.set(dateKey, {
+          tokens: emptyTokenUsage(),
+          sessions: new Set(),
+          cost: 0,
+        });
+      }
+      const day = dailyMap.get(dateKey)!;
+      day.tokens = addTokens(day.tokens, tokens);
+      day.sessions.add(result.sessionId);
+      // Price this file's contribution at its own model's rate so a day with
+      // Opus + Sonnet sessions accumulates the correct blended cost.
+      day.cost += calculateClaudeCost(tokens, result.model).totalCost;
     }
   }
 
@@ -1158,12 +1577,12 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
     const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const day = dailyMap.get(dateKey);
     if (day) {
-      const cost = calculateClaudeCost(day.tokens);
       result.push({
         date: dateKey,
         ...day.tokens,
-        totalCost: cost.totalCost,
+        totalCost: day.cost,
         sessionCount: day.sessions.size,
+        provider: "claude",
       });
     } else {
       result.push({
@@ -1174,6 +1593,7 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
         cache_read_input_tokens: 0,
         totalCost: 0,
         sessionCount: 0,
+        provider: "claude",
       });
     }
   }
@@ -1203,6 +1623,13 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
     let lastActivity = "";
     let errorCount = 0;
     let successCount = 0;
+    let projectCost: CostEstimate = {
+      inputCost: 0,
+      outputCost: 0,
+      cacheWriteCost: 0,
+      cacheReadCost: 0,
+      totalCost: 0,
+    };
 
     for (const file of files) {
       const filePath = path.join(projPath, file);
@@ -1214,18 +1641,24 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
         // Read last 20 lines to check outcome and tally tokens
         const lines = await readLastLines(filePath, 50);
         let sessionHasError = false;
+        let sessionTokens = emptyTokenUsage();
+        let sessionModel: string | null = null;
 
         for (const line of lines) {
           try {
             const entry = JSON.parse(line);
             if (entry.type === "assistant" && entry.message?.usage) {
               const u = entry.message.usage;
-              totalTokens = addTokens(totalTokens, {
+              const usage: TokenUsage = {
                 input_tokens: u.input_tokens || 0,
                 output_tokens: u.output_tokens || 0,
                 cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
                 cache_read_input_tokens: u.cache_read_input_tokens || 0,
-              });
+              };
+              totalTokens = addTokens(totalTokens, usage);
+              sessionTokens = addTokens(sessionTokens, usage);
+              const m = entry.message?.model;
+              if (typeof m === "string" && m.trim()) sessionModel = m;
             }
             // Check for error indicators
             if (entry.type === "assistant" && entry.message?.content) {
@@ -1240,6 +1673,15 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
             }
           } catch { /* skip */ }
         }
+
+        const sessionCost = calculateClaudeCost(sessionTokens, sessionModel);
+        projectCost = {
+          inputCost: projectCost.inputCost + sessionCost.inputCost,
+          outputCost: projectCost.outputCost + sessionCost.outputCost,
+          cacheWriteCost: projectCost.cacheWriteCost + sessionCost.cacheWriteCost,
+          cacheReadCost: projectCost.cacheReadCost + sessionCost.cacheReadCost,
+          totalCost: projectCost.totalCost + sessionCost.totalCost,
+        };
 
         if (sessionHasError) {
           errorCount++;
@@ -1256,12 +1698,13 @@ export async function getProjectStats(): Promise<ProjectStats[]> {
       id: dir.name,
       name: projectNameFromPath(realPath),
       totalTokens,
-      cost: calculateClaudeCost(totalTokens),
+      cost: projectCost,
       sessionCount: files.length,
       lastActivity,
       errorCount,
       successCount,
       errorRate: total > 0 ? errorCount / total : 0,
+      provider: "claude",
     });
   }
 

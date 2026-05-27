@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -33,9 +33,15 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { SystemStatusBar } from "@/components/system-status-bar";
 import { useProvider, type ProviderFilter } from "@/hooks/use-provider";
 
-/** Detect modifier key: ⌘ on Mac, Ctrl on Windows/Linux. */
-function detectModifier(): string {
-  if (typeof navigator === "undefined") return "⌘";
+/**
+ * Detect the platform-specific modifier key: ⌘ on Mac, Ctrl on Windows/Linux.
+ *
+ * Returns null when called server-side so callers can render a stable
+ * placeholder until after hydration — `navigator` only exists in the browser,
+ * so any server-vs-client branch on it produces a hydration mismatch.
+ */
+function detectModifier(): string | null {
+  if (typeof navigator === "undefined") return null;
   return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) ? "⌘" : "Ctrl+";
 }
 
@@ -65,7 +71,13 @@ function NavGroup({
   label: string;
   links: Array<{ href: string; label: string; icon: React.ComponentType<{ className?: string }>; shortcutKey?: string }>;
   isActive: (href: string) => boolean;
-  modifier: string;
+  /**
+   * Platform-specific modifier label. May be null on the very first client
+   * render to keep SSR and client markup identical — the kbd label is hidden
+   * (via `invisible`) in that case so we reserve space without inserting any
+   * text that could mismatch.
+   */
+  modifier: string | null;
 }) {
   return (
     <SidebarGroup>
@@ -81,8 +93,17 @@ function NavGroup({
                 <link.icon className="h-4 w-4" aria-hidden="true" />
                 <span className="flex-1">{link.label}</span>
                 {link.shortcutKey && (
-                  <kbd className="ml-auto text-[10px] text-muted-foreground/60 font-mono" aria-hidden="true">
-                    {modifier}{link.shortcutKey}
+                  <kbd
+                    className={`ml-auto text-[10px] text-muted-foreground/60 font-mono ${
+                      modifier === null ? "invisible" : ""
+                    }`}
+                    aria-hidden="true"
+                    // Suppress hydration warning on this leaf: the content
+                    // legitimately differs between SSR (null → invisible
+                    // placeholder) and post-mount client renders.
+                    suppressHydrationWarning
+                  >
+                    {modifier ?? "⌘"}{link.shortcutKey}
                   </kbd>
                 )}
               </SidebarMenuButton>
@@ -96,13 +117,27 @@ function NavGroup({
 
 const providerOptions: { value: ProviderFilter; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { value: "all", label: "All", icon: Layers },
+  // "Claude" covers Claude Code (CLI + Desktop) AND Cowork sessions — both
+  // run on Anthropic models, so we treat them as a single provider family.
   { value: "claude", label: "Claude", icon: Sparkles },
   { value: "codex", label: "Codex", icon: Bot },
 ];
 
+// useSyncExternalStore plumbing for platform detection. Subscribe is a no-op
+// because the platform never changes within a session.
+const subscribeNoop = () => () => {};
+
 export function AppSidebar() {
   const pathname = usePathname();
-  const [modifier] = useState(detectModifier);
+  // `navigator` only exists in the browser. useSyncExternalStore returns the
+  // server snapshot (null) during SSR and on the very first client render so
+  // SSR + hydration markup match exactly, then switches to the real platform
+  // value on the next commit. No hydration mismatch, no effect needed.
+  const modifier = useSyncExternalStore<string | null>(
+    subscribeNoop,
+    detectModifier,
+    () => null
+  );
   const { provider, setProvider } = useProvider();
 
   const isActive = (href: string) => {

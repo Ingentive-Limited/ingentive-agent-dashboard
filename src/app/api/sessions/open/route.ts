@@ -114,6 +114,20 @@ export async function POST(request: Request) {
       );
     }
 
+    // Cowork sessions can't be resumed from a terminal — they live entirely
+    // inside the Claude Desktop app. Surface a clear error rather than trying
+    // to spawn a no-op `claude -r` against an opaque cwd like
+    // `/sessions/<slug>` that doesn't exist on the user's filesystem.
+    if (session.provider === "cowork") {
+      return NextResponse.json(
+        {
+          error:
+            "Cowork sessions live inside the Claude Desktop app and can't be resumed from a terminal. Open the Claude app to continue this session.",
+        },
+        { status: 400 }
+      );
+    }
+
     const trustedCwd = session.cwd;
     const resolvedProvider = session.provider === "codex" ? "codex" : "claude";
 

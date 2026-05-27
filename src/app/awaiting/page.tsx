@@ -170,9 +170,11 @@ function NotificationSettings() {
 
 export default function AwaitingPage() {
   const { provider } = useProvider();
+  // 5s aligns with the rest of the app so getActiveSessions work stays coalesced
+  // across views, while still surfacing new awaiting-input notifications within one poll.
   const { data: sessions, isLoading } = usePolling<ClaudeSession[]>(
     `/api/sessions?provider=${provider}`,
-    3000
+    5000
   );
   const [browserPermission, setBrowserPermission] = useState<"default" | "granted" | "denied">(() => {
     if (typeof window !== "undefined" && "Notification" in window) {
@@ -369,7 +371,7 @@ export default function AwaitingPage() {
             if (!open) setViewingSession(null);
           }}
           providerName={viewingSession.provider === "codex" ? "Codex" : "Claude"}
-          provider={viewingSession.provider === "codex" ? "codex" : "claude"}
+          provider={viewingSession.provider}
         />
       )}
     </div>
