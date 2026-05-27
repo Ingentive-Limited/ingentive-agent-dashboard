@@ -5,8 +5,12 @@ import { usePolling } from "@/hooks/use-polling";
 import { useAwaitingNotifications } from "@/hooks/use-notifications";
 import { useBillingMode } from "@/hooks/use-billing-mode";
 import { useProvider } from "@/hooks/use-provider";
+import dynamic from "next/dynamic";
 import { OverviewCards } from "@/components/overview-cards";
-import { TokenChart } from "@/components/token-chart";
+const TokenChart = dynamic(() => import("@/components/token-chart").then((m) => m.TokenChart), {
+  ssr: false,
+  loading: () => <div className="h-[350px] w-full animate-pulse rounded-md bg-muted/30" />,
+});
 import { TokenBudgetCard } from "@/components/token-budget";
 import { ActivityHeatmap } from "@/components/activity-heatmap";
 import { StatusBadge } from "@/components/status-badge";
