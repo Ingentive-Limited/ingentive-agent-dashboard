@@ -96,6 +96,100 @@ export function isWithinDir(filePath: string, baseDir: string): boolean {
 
 const READ_CHUNK_SIZE = 8192;
 
+/**
+ * Result of an incremental tail-read of a JSONL file.
+ *
+ * - `newLines`: lines that have been appended since the cached offset. Empty
+ *   when the file is unchanged. The final partial line (no trailing `\n`) is
+ *   dropped so callers never see a half-written record; the next poll will
+ *   pick it up once the writer flushes the newline.
+ * - `fullReparse`: true when incremental read is impossible (first read,
+ *   file shrank, or mtime changed with the same size — all of which suggest
+ *   rotation or rewrite). Callers should fall back to a full scan.
+ * - `currentSize` / `currentMtimeMs`: fresh stat values to store on the
+ *   cache after the caller folds `newLines` (or a full reparse) into the
+ *   accumulated value.
+ */
+export interface IncrementalReadResult {
+  newLines: string[];
+  fullReparse: boolean;
+  currentSize: number;
+  currentMtimeMs: number;
+}
+
+/**
+ * Read only the bytes appended to a JSONL file since the last cache hit.
+ *
+ * Why: tokensFromAudit and the three claude-data caches all key on
+ * `{mtimeMs, size}` and fall back to a full `readLastLines` re-parse on any
+ * mismatch. For multi-MB audit files this is the dominant cost of dashboard
+ * polling. Since JSONL is append-only in the steady state, we can read just
+ * the new tail and accumulate into the cached value.
+ *
+ * Returns `fullReparse: true` when the caller can't safely use the
+ * incremental path — first read (cachedSize === 0), file shrank (rotation),
+ * or unchanged-size-with-different-mtime (likely a rewrite).
+ */
+export async function readIncrementalLines(
+  filePath: string,
+  cachedSize: number,
+  cachedMtimeMs: number
+): Promise<IncrementalReadResult> {
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.stat(filePath);
+  } catch {
+    return {
+      newLines: [],
+      fullReparse: false,
+      currentSize: cachedSize,
+      currentMtimeMs: cachedMtimeMs,
+    };
+  }
+
+  const currentSize = stat.size;
+  const currentMtimeMs = stat.mtimeMs;
+
+  // Unchanged → short-circuit. Caller returns its cached value.
+  if (currentSize === cachedSize && currentMtimeMs === cachedMtimeMs) {
+    return { newLines: [], fullReparse: false, currentSize, currentMtimeMs };
+  }
+
+  // First-ever read, file shrank, or rewrite-in-place → must re-scan.
+  if (cachedSize === 0 || currentSize < cachedSize) {
+    return { newLines: [], fullReparse: true, currentSize, currentMtimeMs };
+  }
+
+  // Same size, different mtime → file was rewritten with identical length.
+  // Rare, but treat as a full re-scan to be safe.
+  if (currentSize === cachedSize) {
+    return { newLines: [], fullReparse: true, currentSize, currentMtimeMs };
+  }
+
+  // currentSize > cachedSize: read the new tail.
+  const bytesToRead = currentSize - cachedSize;
+  const fd = await fs.promises.open(filePath, "r");
+  let chunk: string;
+  try {
+    const buf = Buffer.alloc(bytesToRead);
+    await fd.read(buf, 0, bytesToRead, cachedSize);
+    chunk = buf.toString("utf-8");
+  } catch {
+    return { newLines: [], fullReparse: true, currentSize, currentMtimeMs };
+  } finally {
+    await fd.close();
+  }
+
+  // Split on `\n`. The last element is either an empty string (file ends in
+  // `\n` — clean split) or a partial line caught mid-write. Drop it either
+  // way; we'll see the rest on the next poll once the writer flushes.
+  const parts = chunk.split("\n");
+  parts.pop();
+  const newLines = parts.filter((l) => l.length > 0);
+
+  return { newLines, fullReparse: false, currentSize, currentMtimeMs };
+}
+
 export async function readLastLines(
   filePath: string,
   n: number

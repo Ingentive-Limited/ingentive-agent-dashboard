@@ -30,6 +30,7 @@ import {
   isPidAlive,
   isWithinDir,
   readLastLines,
+  readIncrementalLines,
   cronToHuman,
   projectNameFromPath,
   calculateCost,
@@ -118,28 +119,41 @@ async function readTokenTimeline(
   filePath: string,
   lineCount = 100
 ): Promise<{ entries: TokenTimelineEntry[]; model: string | null }> {
-  let stat: fs.Stats;
+  const cached = timelineCache.get(filePath);
+  const cachedSize = cached?.size ?? 0;
+  const cachedMtimeMs = cached?.mtimeMs ?? 0;
+
+  let inc;
   try {
-    stat = await fs.promises.stat(filePath);
+    inc = await readIncrementalLines(filePath, cachedSize, cachedMtimeMs);
   } catch {
-    return { entries: [], model: null };
+    return cached
+      ? { entries: cached.entries, model: cached.model }
+      : { entries: [], model: null };
   }
 
-  const cached = timelineCache.get(filePath);
-  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+  if (
+    cached &&
+    !inc.fullReparse &&
+    inc.newLines.length === 0 &&
+    inc.currentSize === cachedSize &&
+    inc.currentMtimeMs === cachedMtimeMs
+  ) {
     return { entries: cached.entries, model: cached.model };
   }
 
-  const entries: TokenTimelineEntry[] = [];
-  let lastModel: string | null = null;
-  try {
-    const lines = await readLastLines(filePath, lineCount);
+  // Helper: parse JSONL lines into timeline entries.
+  const parse = (
+    lines: string[]
+  ): { entries: TokenTimelineEntry[]; model: string | null } => {
+    const out: TokenTimelineEntry[] = [];
+    let model: string | null = null;
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
         if (entry.type !== "assistant" || !entry.message?.usage || !entry.timestamp) continue;
         const u = entry.message.usage;
-        entries.push({
+        out.push({
           timestamp: entry.timestamp,
           usage: {
             input_tokens: u.input_tokens || 0,
@@ -148,21 +162,39 @@ async function readTokenTimeline(
             cache_read_input_tokens: u.cache_read_input_tokens || 0,
           },
         });
-        // Last `model` seen wins — entries are in chronological order, so by
-        // the end of the loop this holds the most-recent assistant model id.
         const m = entry.message?.model;
-        if (typeof m === "string" && m.trim()) lastModel = m;
+        if (typeof m === "string" && m.trim()) model = m;
       } catch {
-        // skip invalid lines
+        // skip
       }
     }
-  } catch {
-    // file read error → cache empty result so we don't retry every poll
+    return { entries: out, model };
+  };
+
+  let entries: TokenTimelineEntry[];
+  let lastModel: string | null;
+  if (inc.fullReparse || !cached) {
+    try {
+      const lines = await readLastLines(filePath, lineCount);
+      const parsed = parse(lines);
+      entries = parsed.entries;
+      lastModel = parsed.model;
+    } catch {
+      entries = [];
+      lastModel = null;
+    }
+  } else {
+    const parsed = parse(inc.newLines);
+    // Append the new entries to the cached tail; keep the bounded tail length
+    // so the cache doesn't grow without limit on long-running sessions.
+    const combined = cached.entries.concat(parsed.entries);
+    entries = combined.length > lineCount ? combined.slice(-lineCount) : combined;
+    lastModel = parsed.model ?? cached.model;
   }
 
   timelineCache.set(filePath, {
-    mtimeMs: stat.mtimeMs,
-    size: stat.size,
+    mtimeMs: inc.currentMtimeMs,
+    size: inc.currentSize,
     entries,
     model: lastModel,
   });
@@ -1022,17 +1054,69 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
       let sessionModel: string | null;
 
       const cached = historyCache.get(ref.filePath);
+      const cachedSize = cached?.size ?? 0;
+      const cachedMtimeMs = cached?.mtimeMs ?? 0;
+
+      let inc;
+      try {
+        inc = await readIncrementalLines(ref.filePath, cachedSize, cachedMtimeMs);
+      } catch {
+        inc = null;
+      }
+
       if (
         cached &&
-        cached.mtimeMs === stat.mtimeMs &&
-        cached.size === stat.size
+        inc &&
+        !inc.fullReparse &&
+        inc.newLines.length === 0 &&
+        inc.currentSize === cachedSize &&
+        inc.currentMtimeMs === cachedMtimeMs
       ) {
         totalTokens = cached.totalTokens;
         messageCount = cached.messageCount;
         firstTimestamp = cached.firstTimestamp;
         lastTimestamp = cached.lastTimestamp;
         sessionModel = cached.model;
+      } else if (cached && inc && !inc.fullReparse) {
+        // Incremental: fold new lines into the cached aggregate. firstTimestamp
+        // stays fixed; lastTimestamp + totals + model + count grow.
+        totalTokens = cached.totalTokens;
+        messageCount = cached.messageCount;
+        firstTimestamp = cached.firstTimestamp;
+        lastTimestamp = cached.lastTimestamp;
+        sessionModel = cached.model;
+        for (const line of inc.newLines) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.timestamp) {
+              if (!firstTimestamp) firstTimestamp = entry.timestamp;
+              lastTimestamp = entry.timestamp;
+            }
+            if (entry.type === "assistant" && entry.message?.usage) {
+              messageCount++;
+              const u = entry.message.usage;
+              totalTokens = addTokens(totalTokens, {
+                input_tokens: u.input_tokens || 0,
+                output_tokens: u.output_tokens || 0,
+                cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+                cache_read_input_tokens: u.cache_read_input_tokens || 0,
+              });
+              const m = entry.message?.model;
+              if (typeof m === "string" && m.trim()) sessionModel = m;
+            }
+          } catch { /* skip */ }
+        }
+        historyCache.set(ref.filePath, {
+          mtimeMs: inc.currentMtimeMs,
+          size: inc.currentSize,
+          totalTokens,
+          messageCount,
+          firstTimestamp,
+          lastTimestamp,
+          model: sessionModel,
+        });
       } else {
+        // Full reparse: first read, rotation, or rewrite.
         totalTokens = emptyTokenUsage();
         messageCount = 0;
         firstTimestamp = "";
@@ -1063,8 +1147,8 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
           }
         } catch { /* skip */ }
         historyCache.set(ref.filePath, {
-          mtimeMs: stat.mtimeMs,
-          size: stat.size,
+          mtimeMs: inc?.currentMtimeMs ?? stat.mtimeMs,
+          size: inc?.currentSize ?? stat.size,
           totalTokens,
           messageCount,
           firstTimestamp,
@@ -1369,48 +1453,89 @@ export async function getDailyTokenUsage(days: number = 30): Promise<DailyTokenU
       if (stat.mtimeMs < cutoffMs) return null;
 
       const cached = dailyTokensCache.get(ref.filePath);
+      const cachedSize = cached?.size ?? 0;
+      const cachedMtimeMs = cached?.mtimeMs ?? 0;
+
+      let inc;
+      try {
+        inc = await readIncrementalLines(ref.filePath, cachedSize, cachedMtimeMs);
+      } catch {
+        inc = null;
+      }
+
+      // Unchanged → return cached as-is.
       if (
         cached &&
-        cached.mtimeMs === stat.mtimeMs &&
-        cached.size === stat.size
+        inc &&
+        !inc.fullReparse &&
+        inc.newLines.length === 0 &&
+        inc.currentSize === cachedSize &&
+        inc.currentMtimeMs === cachedMtimeMs
       ) {
         return cached;
       }
 
-      const byDate = new Map<string, TokenUsage>();
-      let fileModel: string | null = null;
-      try {
-        const stream = fs.createReadStream(ref.filePath, { encoding: "utf-8" });
-        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-        for await (const line of rl) {
-          if (!line.trim()) continue;
-          try {
-            const entry = JSON.parse(line);
-            if (entry.type !== "assistant" || !entry.message?.usage || !entry.timestamp) continue;
-            const ts = new Date(entry.timestamp);
-            if (ts.getTime() < cutoffMs) continue;
-            const dateKey = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, "0")}-${String(ts.getDate()).padStart(2, "0")}`;
-            const u = entry.message.usage;
-            byDate.set(
-              dateKey,
-              addTokens(byDate.get(dateKey) ?? emptyTokenUsage(), {
-                input_tokens: u.input_tokens || 0,
-                output_tokens: u.output_tokens || 0,
-                cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
-                cache_read_input_tokens: u.cache_read_input_tokens || 0,
-              })
-            );
-            const m = entry.message?.model;
-            if (typeof m === "string" && m.trim()) fileModel = m;
-          } catch { /* skip */ }
+      // Helper: process a stream of lines into a byDate map + last model.
+      // Used by both the incremental path (over `newLines`) and the full
+      // re-scan path (over a readline stream).
+      const addLineToByDate = (
+        line: string,
+        byDate: Map<string, TokenUsage>,
+        prevModel: string | null
+      ): string | null => {
+        if (!line.trim()) return prevModel;
+        try {
+          const entry = JSON.parse(line);
+          if (entry.type !== "assistant" || !entry.message?.usage || !entry.timestamp) return prevModel;
+          const ts = new Date(entry.timestamp);
+          if (ts.getTime() < cutoffMs) return prevModel;
+          const dateKey = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, "0")}-${String(ts.getDate()).padStart(2, "0")}`;
+          const u = entry.message.usage;
+          byDate.set(
+            dateKey,
+            addTokens(byDate.get(dateKey) ?? emptyTokenUsage(), {
+              input_tokens: u.input_tokens || 0,
+              output_tokens: u.output_tokens || 0,
+              cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+              cache_read_input_tokens: u.cache_read_input_tokens || 0,
+            })
+          );
+          const m = entry.message?.model;
+          if (typeof m === "string" && m.trim()) return m;
+        } catch { /* skip */ }
+        return prevModel;
+      };
+
+      let byDate: Map<string, TokenUsage>;
+      let fileModel: string | null;
+
+      if (cached && inc && !inc.fullReparse) {
+        // Incremental: clone the cached byDate so we don't mutate the shared
+        // instance (it is returned and merged into dailyMap downstream), then
+        // fold in tokens from new lines only.
+        byDate = new Map(cached.byDate);
+        fileModel = cached.model;
+        for (const line of inc.newLines) {
+          fileModel = addLineToByDate(line, byDate, fileModel);
         }
-      } catch {
-        // file read error
+      } else {
+        // Full re-scan: rotation, first read, or rewrite.
+        byDate = new Map<string, TokenUsage>();
+        fileModel = null;
+        try {
+          const stream = fs.createReadStream(ref.filePath, { encoding: "utf-8" });
+          const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+          for await (const line of rl) {
+            fileModel = addLineToByDate(line, byDate, fileModel);
+          }
+        } catch {
+          // file read error
+        }
       }
 
       const fresh: CachedDailyTokens = {
-        mtimeMs: stat.mtimeMs,
-        size: stat.size,
+        mtimeMs: inc?.currentMtimeMs ?? stat.mtimeMs,
+        size: inc?.currentSize ?? stat.size,
         byDate,
         sessionId: ref.sessionId,
         model: fileModel,

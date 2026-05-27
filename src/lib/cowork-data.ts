@@ -44,6 +44,7 @@ import {
   emptyTokenUsage,
   addTokens,
   readLastLines,
+  readIncrementalLines,
   projectNameFromPath,
   calculateCost,
   isWithinDir,
@@ -370,32 +371,33 @@ const tokensCache = new Map<string, CachedTokens>();
 async function tokensFromAudit(auditPath: string): Promise<TokenUsage> {
   if (!fs.existsSync(auditPath)) return emptyTokenUsage();
 
-  let stat: fs.Stats;
+  const cached = tokensCache.get(auditPath);
+  const cachedSize = cached?.size ?? 0;
+  const cachedMtimeMs = cached?.mtimeMs ?? 0;
+
+  let inc;
   try {
-    stat = fs.statSync(auditPath);
+    inc = await readIncrementalLines(auditPath, cachedSize, cachedMtimeMs);
   } catch {
-    return emptyTokenUsage();
+    return cached?.tokens ?? emptyTokenUsage();
   }
 
-  const cached = tokensCache.get(auditPath);
+  // Unchanged file → return cached value.
   if (
     cached &&
-    cached.mtimeMs === stat.mtimeMs &&
-    cached.size === stat.size
+    !inc.fullReparse &&
+    inc.newLines.length === 0 &&
+    inc.currentSize === cachedSize &&
+    inc.currentMtimeMs === cachedMtimeMs
   ) {
     return cached.tokens;
   }
 
-  let total = emptyTokenUsage();
-  try {
-    // Read up to ~5000 lines from the tail — enough for very long sessions
-    // without paying to stream multi-MB files.
-    const lines = await readLastLines(auditPath, 5000);
+  // Helper: scan an array of JSONL lines and accumulate token usage. The
+  // string prefilter avoids parsing the (majority) non-assistant lines.
+  const scan = (lines: string[], start: TokenUsage): TokenUsage => {
+    let total = start;
     for (const line of lines) {
-      // Cheap string prefilter: JSON.parse on a multi-KB line costs ~10–100µs,
-      // so for the typical audit file (~80% of lines are non-assistant
-      // events like tool_use_block, queue-operation, etc.) the prefilter
-      // gives us a 5–10× speedup on the cold scan.
       if (line.indexOf('"usage"') === -1 || line.indexOf('"input_tokens"') === -1) {
         continue;
       }
@@ -414,13 +416,27 @@ async function tokensFromAudit(auditPath: string): Promise<TokenUsage> {
         // skip
       }
     }
-  } catch {
-    // ignore
+    return total;
+  };
+
+  let total: TokenUsage;
+  if (inc.fullReparse || !cached) {
+    // Full re-scan: rotation, first read, or rewrite.
+    total = emptyTokenUsage();
+    try {
+      const lines = await readLastLines(auditPath, 5000);
+      total = scan(lines, total);
+    } catch {
+      // ignore
+    }
+  } else {
+    // Incremental: fold new lines into cached total.
+    total = scan(inc.newLines, cached.tokens);
   }
 
   tokensCache.set(auditPath, {
-    mtimeMs: stat.mtimeMs,
-    size: stat.size,
+    mtimeMs: inc.currentMtimeMs,
+    size: inc.currentSize,
     tokens: total,
   });
   return total;
