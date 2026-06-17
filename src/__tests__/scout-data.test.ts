@@ -284,6 +284,7 @@ describe("tokensFromEvents", () => {
 
     const result = tokensFromEvents(lines, {
       tokensByModel: new Map(),
+      requestsByModel: new Map(),
       shutdownSeen: false,
     });
     expect(result.tokensByModel.size).toBe(1);
@@ -316,6 +317,7 @@ describe("tokensFromEvents", () => {
 
     const result = tokensFromEvents(lines, {
       tokensByModel: new Map(),
+      requestsByModel: new Map(),
       shutdownSeen: false,
     });
     expect(result.tokensByModel.get("claude-opus-4.7")?.input_tokens).toBe(100);
@@ -331,6 +333,7 @@ describe("tokensFromEvents", () => {
 
     const result = tokensFromEvents(lines, {
       tokensByModel: new Map(),
+      requestsByModel: new Map(),
       shutdownSeen: false,
     });
     expect(result.tokensByModel.size).toBe(0);
@@ -354,6 +357,7 @@ describe("tokensFromEvents", () => {
 
     const result = tokensFromEvents(lines, {
       tokensByModel: new Map(),
+      requestsByModel: new Map(),
       shutdownSeen: false,
     });
     expect(result.shutdownSeen).toBe(true);
@@ -386,6 +390,7 @@ describe("tokensFromEvents", () => {
 
     const result = tokensFromEvents(lines, {
       tokensByModel: new Map(),
+      requestsByModel: new Map(),
       shutdownSeen: false,
     });
     expect(result.tokensByModel.get("claude-opus-4.7")?.input_tokens).toBe(999);
@@ -395,9 +400,77 @@ describe("tokensFromEvents", () => {
   it("handles empty input", () => {
     const result = tokensFromEvents([], {
       tokensByModel: new Map(),
+      requestsByModel: new Map(),
       shutdownSeen: false,
     });
     expect(result.tokensByModel.size).toBe(0);
+    expect(result.requestsByModel.size).toBe(0);
     expect(empty.input_tokens).toBe(0); // sanity: empty fixture compiles
+  });
+
+  it("counts one premium request per assistant.message event", () => {
+    const lines = [
+      sessionStart("claude-opus-4.7"),
+      assistantMessage({ model: "claude-opus-4.7", usage: { inputTokens: 10, outputTokens: 20 } }),
+      assistantMessage({ model: "claude-opus-4.7", usage: { inputTokens: 10, outputTokens: 20 } }),
+      assistantMessage({ model: "claude-opus-4.7", usage: { inputTokens: 10, outputTokens: 20 } }),
+    ].map((e) => JSON.stringify(e));
+
+    const result = tokensFromEvents(lines, {
+      tokensByModel: new Map(),
+      requestsByModel: new Map(),
+      shutdownSeen: false,
+    });
+    expect(result.requestsByModel.get("claude-opus-4.7")).toBe(3);
+  });
+
+  it("counts requests per model when a session switches mid-flight", () => {
+    const lines = [
+      sessionStart("claude-opus-4.7"),
+      assistantMessage({ model: "claude-opus-4.7", usage: { inputTokens: 1, outputTokens: 1 } }),
+      assistantMessage({ model: "claude-opus-4.7", usage: { inputTokens: 1, outputTokens: 1 } }),
+      assistantMessage({ model: "claude-sonnet-4.6", usage: { inputTokens: 1, outputTokens: 1 } }),
+    ].map((e) => JSON.stringify(e));
+
+    const result = tokensFromEvents(lines, {
+      tokensByModel: new Map(),
+      requestsByModel: new Map(),
+      shutdownSeen: false,
+    });
+    expect(result.requestsByModel.get("claude-opus-4.7")).toBe(2);
+    expect(result.requestsByModel.get("claude-sonnet-4.6")).toBe(1);
+  });
+
+  it("prefers session.shutdown.modelMetrics.<model>.requests.count when present", () => {
+    const lines = [
+      sessionStart("claude-opus-4.7"),
+      assistantMessage({ model: "claude-opus-4.7", usage: { inputTokens: 10, outputTokens: 20 } }),
+      assistantMessage({ model: "claude-opus-4.7", usage: { inputTokens: 10, outputTokens: 20 } }),
+      {
+        type: "session.shutdown",
+        data: {
+          modelMetrics: {
+            "claude-opus-4.7": {
+              requests: { count: 19, cost: 142.5 },
+              usage: {
+                inputTokens: 999,
+                outputTokens: 888,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                reasoningTokens: 0,
+              },
+            },
+          },
+        },
+      },
+    ].map((e) => JSON.stringify(e));
+
+    const result = tokensFromEvents(lines, {
+      tokensByModel: new Map(),
+      requestsByModel: new Map(),
+      shutdownSeen: false,
+    });
+    expect(result.shutdownSeen).toBe(true);
+    expect(result.requestsByModel.get("claude-opus-4.7")).toBe(19);
   });
 });

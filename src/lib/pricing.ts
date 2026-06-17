@@ -162,3 +162,97 @@ export function pricingForModel(
     : OPENAI_PRICING[OPENAI_DEFAULT_KEY];
   return perToken(defaultPricing);
 }
+
+// ── GitHub Copilot premium-request pricing ────────────────────────────────────
+//
+// Microsoft Scout is an Electron wrapper around the @github/copilot CLI, so
+// it bills like Copilot does, not like the direct Anthropic / OpenAI APIs.
+// Copilot's pricing model is "premium requests": each assistant turn consumes
+// (multiplier × 1) premium-request units from the user's monthly plan
+// allowance. Going over allowance costs $0.04 per premium-request unit.
+//
+// The multipliers below mirror Microsoft's public Copilot pricing as of
+// 2025-06. Source: https://docs.github.com/en/copilot/managing-copilot/
+//   monitoring-usage-and-entitlements/about-premium-requests
+//
+// Per-token API prices (above) ARE NOT applied to Scout sessions — the
+// user is billed by Copilot, not directly by Anthropic / OpenAI.
+
+/**
+ * Premium-request multiplier per model (Copilot pricing tiers as of 2025-06).
+ * Keys are matched first exact, then prefix-stem (longest first), then
+ * normalised dotted/dashed (e.g. `claude-opus-4.7` → `claude-opus-4-7`).
+ */
+export const COPILOT_MULTIPLIERS: Record<string, number> = {
+  // Anthropic — Opus tier (premium reasoning)
+  "claude-opus-4-7": 10,
+  "claude-opus-4-6": 10,
+  "claude-opus-4": 10,
+  "claude-opus": 10,
+  // Anthropic — Sonnet tier (standard)
+  "claude-sonnet-4-6": 1,
+  "claude-sonnet-4-5": 1,
+  "claude-sonnet-4": 1,
+  "claude-sonnet-3-7": 1,
+  "claude-sonnet-3-5": 1,
+  "claude-sonnet": 1,
+  // Anthropic — Haiku tier
+  "claude-haiku-4-5": 0.25,
+  "claude-haiku-4": 0.25,
+  "claude-haiku": 0.25,
+  // OpenAI flagship / reasoning
+  "gpt-4o": 1,
+  "gpt-4-1": 0,
+  "gpt-4o-mini": 0.33,
+  "gpt-5": 1,
+  "gpt-5-codex": 1,
+  "gpt-5-mini": 0.25,
+  "o1-preview": 10,
+  "o1": 10,
+  "o3-mini": 0.33,
+  "o3": 10,
+  "o4-mini": 0.33,
+  // Google Gemini
+  "gemini-2-0-flash": 0.25,
+  "gemini-2-5-pro": 1,
+  "gemini-2-5-flash": 0.25,
+};
+
+const COPILOT_DEFAULT_MULTIPLIER = 1;
+/** Retail dollar cost per premium-request unit when over-allowance. */
+export const COPILOT_OVER_QUOTA_RATE_USD = 0.04;
+
+/**
+ * Premium-request multiplier for a Copilot model. Returns the matrix's
+ * default (1×) if the model is unknown or unset.
+ */
+export function copilotMultiplier(model: string | null | undefined): number {
+  if (!model || typeof model !== "string") return COPILOT_DEFAULT_MULTIPLIER;
+  const trimmed = model.trim();
+  if (!trimmed) return COPILOT_DEFAULT_MULTIPLIER;
+  const lower = trimmed.toLowerCase();
+  if (lower in COPILOT_MULTIPLIERS) return COPILOT_MULTIPLIERS[lower];
+  const normalized = normalizeModelId(lower);
+  if (normalized in COPILOT_MULTIPLIERS) return COPILOT_MULTIPLIERS[normalized];
+  // Prefix match — longest stem first so e.g. "claude-opus-4-7" prefers
+  // "claude-opus-4" over "claude-opus".
+  const candidates = Object.keys(COPILOT_MULTIPLIERS)
+    .filter((k) => normalized.startsWith(k))
+    .sort((a, b) => b.length - a.length);
+  if (candidates.length > 0) return COPILOT_MULTIPLIERS[candidates[0]];
+  return COPILOT_DEFAULT_MULTIPLIER;
+}
+
+/**
+ * Dollar cost of `count` Copilot premium requests on `model` at the
+ * over-allowance retail rate. Subscription users within their plan allowance
+ * don't pay this — the figure is what they'd be billed if they exceeded the
+ * monthly premium-request quota.
+ */
+export function costForCopilotRequests(
+  model: string | null | undefined,
+  count: number
+): number {
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return count * copilotMultiplier(model) * COPILOT_OVER_QUOTA_RATE_USD;
+}
