@@ -15,6 +15,7 @@ import {
   Sparkles,
   Bot,
   Layers,
+  Compass,
 } from "lucide-react";
 import {
   Sidebar,
@@ -121,6 +122,10 @@ const providerOptions: { value: ProviderFilter; label: string; icon: React.Compo
   // run on Anthropic models, so we treat them as a single provider family.
   { value: "claude", label: "Claude", icon: Sparkles },
   { value: "codex", label: "Codex", icon: Bot },
+  // Microsoft Scout — its own filter even though the model is Anthropic
+  // today. Vendor / tool is distinct and the cost / project rollup should
+  // not blend into the Claude family.
+  { value: "scout", label: "Scout", icon: Compass },
 ];
 
 // useSyncExternalStore plumbing for platform detection. Subscribe is a no-op
