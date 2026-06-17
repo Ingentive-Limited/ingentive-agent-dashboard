@@ -3,6 +3,9 @@ import {
   pricingForModel,
   ANTHROPIC_PRICING,
   OPENAI_PRICING,
+  copilotMultiplier,
+  costForCopilotRequests,
+  COPILOT_OVER_QUOTA_RATE_USD,
 } from "@/lib/pricing";
 
 /**
@@ -133,5 +136,56 @@ describe("pricingForModel", () => {
     expect(ANTHROPIC_PRICING["claude-opus-4"].output).toBe(75);
     expect(ANTHROPIC_PRICING["claude-sonnet-4"].output).toBe(15);
     expect(OPENAI_PRICING["gpt-5.4-mini"].output).toBe(1);
+  });
+});
+
+describe("GitHub Copilot premium-request pricing", () => {
+  it("uses 10x multiplier for Claude Opus", () => {
+    expect(copilotMultiplier("claude-opus-4.7")).toBe(10);
+    expect(copilotMultiplier("claude-opus-4-7")).toBe(10);
+    expect(copilotMultiplier("claude-opus-4")).toBe(10);
+  });
+
+  it("uses 1x multiplier for Claude Sonnet", () => {
+    expect(copilotMultiplier("claude-sonnet-4-6")).toBe(1);
+    expect(copilotMultiplier("claude-sonnet-3.5")).toBe(1);
+  });
+
+  it("uses 0.25x multiplier for Claude Haiku", () => {
+    expect(copilotMultiplier("claude-haiku-4-5")).toBe(0.25);
+  });
+
+  it("normalises dotted model ids", () => {
+    // Scout writes "claude-opus-4.7"; pricing table keys use dashes.
+    expect(copilotMultiplier("claude-opus-4.7")).toBe(10);
+    expect(copilotMultiplier("claude-sonnet-4.6")).toBe(1);
+  });
+
+  it("falls back to 1x for unknown models", () => {
+    expect(copilotMultiplier(null)).toBe(1);
+    expect(copilotMultiplier(undefined)).toBe(1);
+    expect(copilotMultiplier("")).toBe(1);
+    expect(copilotMultiplier("something-weird")).toBe(1);
+  });
+
+  it("computes over-quota cost as count × multiplier × $0.04", () => {
+    // 1 Opus 4.7 request = 10 × $0.04 = $0.40
+    expect(costForCopilotRequests("claude-opus-4.7", 1)).toBeCloseTo(0.4, 12);
+    // 20 Opus requests = 20 × 10 × $0.04 = $8
+    expect(costForCopilotRequests("claude-opus-4.7", 20)).toBeCloseTo(8.0, 12);
+    // 5 Sonnet requests = 5 × 1 × $0.04 = $0.20
+    expect(costForCopilotRequests("claude-sonnet-4.6", 5)).toBeCloseTo(0.2, 12);
+    // 100 Haiku requests = 100 × 0.25 × $0.04 = $1.00
+    expect(costForCopilotRequests("claude-haiku-4-5", 100)).toBeCloseTo(1.0, 12);
+  });
+
+  it("returns 0 for zero / negative / non-finite counts", () => {
+    expect(costForCopilotRequests("claude-opus-4.7", 0)).toBe(0);
+    expect(costForCopilotRequests("claude-opus-4.7", -5)).toBe(0);
+    expect(costForCopilotRequests("claude-opus-4.7", NaN)).toBe(0);
+  });
+
+  it("exposes the over-quota retail rate constant", () => {
+    expect(COPILOT_OVER_QUOTA_RATE_USD).toBe(0.04);
   });
 });

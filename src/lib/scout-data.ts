@@ -57,41 +57,43 @@ import {
   readLastLines,
   readIncrementalLines,
   projectNameFromPath,
-  calculateCost,
   isWithinDir,
   formatLocalDate,
 } from "./utils-server";
-import { pricingForModel } from "./pricing";
+import { costForCopilotRequests } from "./pricing";
 
 const SCOUT_ROOT = path.join(os.homedir(), ".copilot", "session-state");
 
 /**
- * Combine token totals split by model into a single cost. Each (model,
- * tokens) pair is priced with `pricingForModel("scout", model)` so a session
- * that switched mid-flight is priced correctly for every turn.
+ * Combine premium-request counts split by model into a single cost.
+ *
+ * Scout is a Microsoft-shipped Electron wrapper around the @github/copilot
+ * CLI. Users are billed by Copilot using its premium-request model
+ * (allowance + over-allowance retail at $0.04/unit × model multiplier),
+ * NOT by per-token Anthropic / OpenAI rates. Showing the latter would
+ * massively over-state cost — a heavy Opus session with billions of
+ * cache_read tokens would look like $10k at API rates but is actually
+ * ~20 premium requests × 10× × $0.04 ≈ $8 at Copilot retail.
+ *
+ * We track request counts per model so a session that switched models
+ * mid-flight prices each segment at the correct multiplier. The
+ * token-level breakdown of inputCost / outputCost / cacheWriteCost /
+ * cacheReadCost doesn't fit Copilot's billing model — those fields are
+ * zeroed for Scout sessions, with the whole figure going into totalCost.
  */
 function calculateScoutCost(
-  tokensByModel: Map<string, TokenUsage>
+  requestsByModel: Map<string, number>
 ): CostEstimate {
-  let totalInput = 0;
-  let totalOutput = 0;
-  let totalCacheWrite = 0;
-  let totalCacheRead = 0;
-  let totalSum = 0;
-  for (const [model, tokens] of tokensByModel.entries()) {
-    const c = calculateCost(tokens, pricingForModel(model, "scout"));
-    totalInput += c.inputCost;
-    totalOutput += c.outputCost;
-    totalCacheWrite += c.cacheWriteCost;
-    totalCacheRead += c.cacheReadCost;
-    totalSum += c.totalCost;
+  let total = 0;
+  for (const [model, count] of requestsByModel.entries()) {
+    total += costForCopilotRequests(model, count);
   }
   return {
-    inputCost: totalInput,
-    outputCost: totalOutput,
-    cacheWriteCost: totalCacheWrite,
-    cacheReadCost: totalCacheRead,
-    totalCost: totalSum,
+    inputCost: 0,
+    outputCost: 0,
+    cacheWriteCost: 0,
+    cacheReadCost: 0,
+    totalCost: total,
   };
 }
 
@@ -389,6 +391,14 @@ interface CachedTokens {
   mtimeMs: number;
   size: number;
   tokensByModel: Map<string, TokenUsage>;
+  /**
+   * Premium-request count per model. Each `assistant.message` event is one
+   * premium request (i.e. one round-trip with the model). When
+   * `session.shutdown.modelMetrics.<model>.requests.count` is present it
+   * supersedes the per-message count (it's the canonical figure Microsoft
+   * itself records and bills against).
+   */
+  requestsByModel: Map<string, number>;
   /** Last `selectedModel` seen — used as fallback when an event doesn't tag a model. */
   lastModel?: string;
   /** Whether session.shutdown was observed; if so, modelMetrics is authoritative. */
@@ -405,6 +415,10 @@ function addToBucket(
   bucket.set(model, existing ? addTokens(existing, tokens) : tokens);
 }
 
+function incrementRequest(bucket: Map<string, number>, model: string): void {
+  bucket.set(model, (bucket.get(model) ?? 0) + 1);
+}
+
 /**
  * Scan an events.jsonl and return tokens grouped by `model`. Both shapes are
  * handled — per-message `data.usage` on `assistant.message`, and the
@@ -416,15 +430,29 @@ function addToBucket(
  */
 export function tokensFromEvents(
   lines: string[],
-  initial: { tokensByModel: Map<string, TokenUsage>; lastModel?: string; shutdownSeen: boolean }
-): { tokensByModel: Map<string, TokenUsage>; lastModel?: string; shutdownSeen: boolean } {
-  const perMessage = new Map<string, TokenUsage>();
-  for (const [m, t] of initial.tokensByModel.entries()) perMessage.set(m, t);
+  initial: {
+    tokensByModel: Map<string, TokenUsage>;
+    requestsByModel: Map<string, number>;
+    lastModel?: string;
+    shutdownSeen: boolean;
+  }
+): {
+  tokensByModel: Map<string, TokenUsage>;
+  requestsByModel: Map<string, number>;
+  lastModel?: string;
+  shutdownSeen: boolean;
+} {
+  // Carry forward the running per-message accumulator across incremental
+  // chunks. Tokens are summed; request count is incremented per assistant
+  // message. When a shutdown lands, modelMetrics replaces both totals.
+  const perMessageTokens = new Map<string, TokenUsage>();
+  const perMessageRequests = new Map<string, number>();
+  for (const [m, t] of initial.tokensByModel.entries()) perMessageTokens.set(m, t);
+  for (const [m, c] of initial.requestsByModel.entries()) perMessageRequests.set(m, c);
   let lastModel = initial.lastModel;
   let shutdownSeen = initial.shutdownSeen;
-  // If a shutdown was already observed in a prior chunk, the totals frozen
-  // in `initial.tokensByModel` came from modelMetrics — leave them alone.
-  const shutdownTotals = new Map<string, TokenUsage>();
+  const shutdownTokens = new Map<string, TokenUsage>();
+  const shutdownRequests = new Map<string, number>();
 
   for (const line of lines) {
     if (
@@ -453,10 +481,13 @@ export function tokensFromEvents(
       const model =
         typeof data.model === "string" ? data.model : lastModel ?? "unknown";
       if (typeof data.model === "string") lastModel = data.model;
+      // Every assistant turn is one Copilot premium request, regardless of
+      // whether the message carries a per-turn usage payload.
+      incrementRequest(perMessageRequests, model);
       const usage =
         (data.usage as Record<string, unknown> | undefined) ?? undefined;
       if (usage) {
-        addToBucket(perMessage, model, normaliseScoutUsage(usage));
+        addToBucket(perMessageTokens, model, normaliseScoutUsage(usage));
       }
       continue;
     }
@@ -469,25 +500,56 @@ export function tokensFromEvents(
       if (metrics) {
         for (const [model, mv] of Object.entries(metrics)) {
           const usage = (mv?.usage ?? {}) as Record<string, unknown>;
-          if (Object.keys(usage).length === 0) continue;
-          addToBucket(shutdownTotals, model, normaliseScoutUsage(usage));
+          if (Object.keys(usage).length > 0) {
+            addToBucket(shutdownTokens, model, normaliseScoutUsage(usage));
+          }
+          // requests.count is the canonical figure — Microsoft writes it
+          // even when usage is empty, so always check it.
+          const requests = mv?.requests as
+            | Record<string, unknown>
+            | undefined;
+          const count =
+            requests && typeof requests.count === "number"
+              ? requests.count
+              : 0;
+          if (count > 0) {
+            shutdownRequests.set(
+              model,
+              (shutdownRequests.get(model) ?? 0) + count
+            );
+          }
         }
       }
       continue;
     }
   }
 
-  if (shutdownSeen && shutdownTotals.size > 0) {
-    return { tokensByModel: shutdownTotals, lastModel, shutdownSeen };
+  // When a shutdown was seen with at least one usage or request entry, treat
+  // its totals as authoritative (they're what Microsoft's own bookkeeping
+  // recorded) and drop the per-message accumulation to avoid double-counting.
+  if (shutdownSeen && (shutdownTokens.size > 0 || shutdownRequests.size > 0)) {
+    return {
+      tokensByModel: shutdownTokens,
+      requestsByModel: shutdownRequests,
+      lastModel,
+      shutdownSeen,
+    };
   }
-  return { tokensByModel: perMessage, lastModel, shutdownSeen };
+  return {
+    tokensByModel: perMessageTokens,
+    requestsByModel: perMessageRequests,
+    lastModel,
+    shutdownSeen,
+  };
 }
 
-async function tokensForSession(
-  eventsPath: string
-): Promise<{ tokensByModel: Map<string, TokenUsage>; lastModel?: string }> {
+async function tokensForSession(eventsPath: string): Promise<{
+  tokensByModel: Map<string, TokenUsage>;
+  requestsByModel: Map<string, number>;
+  lastModel?: string;
+}> {
   if (!fs.existsSync(eventsPath)) {
-    return { tokensByModel: new Map() };
+    return { tokensByModel: new Map(), requestsByModel: new Map() };
   }
 
   const cached = tokensCache.get(eventsPath);
@@ -500,6 +562,7 @@ async function tokensForSession(
   } catch {
     return {
       tokensByModel: cached?.tokensByModel ?? new Map(),
+      requestsByModel: cached?.requestsByModel ?? new Map(),
       lastModel: cached?.lastModel,
     };
   }
@@ -511,7 +574,11 @@ async function tokensForSession(
     inc.currentSize === cachedSize &&
     inc.currentMtimeMs === cachedMtimeMs
   ) {
-    return { tokensByModel: cached.tokensByModel, lastModel: cached.lastModel };
+    return {
+      tokensByModel: cached.tokensByModel,
+      requestsByModel: cached.requestsByModel,
+      lastModel: cached.lastModel,
+    };
   }
 
   let result: ReturnType<typeof tokensFromEvents>;
@@ -527,11 +594,13 @@ async function tokensForSession(
     }
     result = tokensFromEvents(lines, {
       tokensByModel: new Map(),
+      requestsByModel: new Map(),
       shutdownSeen: false,
     });
   } else {
     result = tokensFromEvents(inc.newLines, {
       tokensByModel: cached.tokensByModel,
+      requestsByModel: cached.requestsByModel,
       lastModel: cached.lastModel,
       shutdownSeen: cached.shutdownSeen,
     });
@@ -541,11 +610,13 @@ async function tokensForSession(
     mtimeMs: inc.currentMtimeMs,
     size: inc.currentSize,
     tokensByModel: result.tokensByModel,
+    requestsByModel: result.requestsByModel,
     lastModel: result.lastModel,
     shutdownSeen: result.shutdownSeen,
   });
   return {
     tokensByModel: result.tokensByModel,
+    requestsByModel: result.requestsByModel,
     lastModel: result.lastModel,
   };
 }
@@ -634,7 +705,13 @@ function projectKeyFromId(id: string): string | null {
 
 async function tokensForMany(
   sessions: ScoutSessionMeta[]
-): Promise<Array<{ tokensByModel: Map<string, TokenUsage>; lastModel?: string }>> {
+): Promise<
+  Array<{
+    tokensByModel: Map<string, TokenUsage>;
+    requestsByModel: Map<string, number>;
+    lastModel?: string;
+  }>
+> {
   return Promise.all(sessions.map((s) => tokensForSession(s.eventsPath)));
 }
 
@@ -666,9 +743,9 @@ export async function getProjects(): Promise<ProjectSummary[]> {
 
     for (let i = 0; i < items.length; i++) {
       const meta = items[i];
-      const { tokensByModel } = tokensPerItem[i];
+      const { tokensByModel, requestsByModel } = tokensPerItem[i];
       totalTokens = addTokens(totalTokens, sumTokens(tokensByModel));
-      const c = calculateScoutCost(tokensByModel);
+      const c = calculateScoutCost(requestsByModel);
       projectCost = {
         inputCost: projectCost.inputCost + c.inputCost,
         outputCost: projectCost.outputCost + c.outputCost,
@@ -737,12 +814,12 @@ export async function getProjectDetail(
 
   for (let i = 0; i < sorted.length; i++) {
     const meta = sorted[i];
-    const { tokensByModel } = tokensPerItem[i];
+    const { tokensByModel, requestsByModel } = tokensPerItem[i];
     const tokens = sumTokens(tokensByModel);
     totalTokens = addTokens(totalTokens, tokens);
     cumulativeInput += tokens.input_tokens;
     cumulativeOutput += tokens.output_tokens;
-    const sessionCost = calculateScoutCost(tokensByModel);
+    const sessionCost = calculateScoutCost(requestsByModel);
     projectCost = {
       inputCost: projectCost.inputCost + sessionCost.inputCost,
       outputCost: projectCost.outputCost + sessionCost.outputCost,
@@ -798,7 +875,7 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
   const tokensPerItem = await tokensForMany(sessions);
 
   const history: SessionHistory[] = sessions.map((meta, idx) => {
-    const { tokensByModel } = tokensPerItem[idx];
+    const { tokensByModel, requestsByModel } = tokensPerItem[idx];
     const tokens = sumTokens(tokensByModel);
     const hasLock = !!meta.lockPath && fs.existsSync(meta.lockPath);
     const { status } = getStatusFromEvents(meta.eventsPath, hasLock);
@@ -816,7 +893,7 @@ export async function getSessionHistory(): Promise<SessionHistory[]> {
         status === "dead" ? new Date(meta.mtimeMs).toISOString() : undefined,
       entrypoint: "scout",
       totalTokens: tokens,
-      cost: calculateScoutCost(tokensByModel),
+      cost: calculateScoutCost(requestsByModel),
       messageCount: 0,
       status,
       provider: "scout" as const,
@@ -870,13 +947,13 @@ export async function getDailyTokenUsage(days = 30): Promise<DailyTokenUsage[]> 
       ? Date.parse(meta.start.startTime)
       : meta.mtimeMs;
     const dateStr = formatLocalDate(new Date(startedAt));
-    const { tokensByModel } = tokensPerItem[i];
+    const { tokensByModel, requestsByModel } = tokensPerItem[i];
     const tokens = sumTokens(tokensByModel);
     byDay.set(
       dateStr,
       addTokens(byDay.get(dateStr) ?? emptyTokenUsage(), tokens)
     );
-    const cost = calculateScoutCost(tokensByModel).totalCost;
+    const cost = calculateScoutCost(requestsByModel).totalCost;
     costByDay.set(dateStr, (costByDay.get(dateStr) ?? 0) + cost);
     sessionsByDay.set(dateStr, (sessionsByDay.get(dateStr) ?? 0) + 1);
   }
