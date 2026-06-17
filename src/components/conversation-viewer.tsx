@@ -178,7 +178,7 @@ export function ConversationViewer({
   onOpenChange: (open: boolean) => void;
   providerName?: string;
   /** Underlying provider for correct server-side JSONL parsing. */
-  provider?: "claude" | "codex" | "cowork";
+  provider?: "claude" | "codex" | "cowork" | "scout";
 }) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(false);

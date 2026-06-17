@@ -128,6 +128,18 @@ export async function POST(request: Request) {
       );
     }
 
+    // Scout sessions live inside the Microsoft Scout Electron app. Same
+    // story — there's no CLI to resume against.
+    if (session.provider === "scout") {
+      return NextResponse.json(
+        {
+          error:
+            "Scout sessions live inside the Microsoft Scout app and can't be resumed from a terminal. Open Scout to continue this session.",
+        },
+        { status: 400 }
+      );
+    }
+
     const trustedCwd = session.cwd;
     const resolvedProvider = session.provider === "codex" ? "codex" : "claude";
 

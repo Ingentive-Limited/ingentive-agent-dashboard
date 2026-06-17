@@ -62,11 +62,23 @@ function perToken(p: ModelPricing): PricingConfig {
   };
 }
 
+/**
+ * Normalize a model id before prefix-matching. Scout emits dotted ids like
+ * `claude-opus-4.7` whereas Claude Code / Codex use dashes (`claude-opus-4-7`).
+ * Converting `.` → `-` makes both forms hit the same family bucket without
+ * needing duplicate keys in the pricing table.
+ */
+function normalizeModelId(model: string): string {
+  return model.replace(/\./g, "-");
+}
+
 function lookupAnthropic(model: string): ModelPricing | undefined {
   // Exact match first (e.g. "claude-opus-4-7")
   if (ANTHROPIC_PRICING[model]) return ANTHROPIC_PRICING[model];
+  const normalized = normalizeModelId(model);
+  if (ANTHROPIC_PRICING[normalized]) return ANTHROPIC_PRICING[normalized];
   // Prefix match by family stem (e.g. "claude-opus-4-7" → "claude-opus-4")
-  const lower = model.toLowerCase();
+  const lower = normalized.toLowerCase();
   if (lower.startsWith("claude-opus")) return ANTHROPIC_PRICING["claude-opus-4"];
   if (lower.startsWith("claude-sonnet")) return ANTHROPIC_PRICING["claude-sonnet-4"];
   if (lower.startsWith("claude-haiku")) return ANTHROPIC_PRICING["claude-haiku-4"];
@@ -75,6 +87,11 @@ function lookupAnthropic(model: string): ModelPricing | undefined {
 
 function lookupOpenAI(model: string): ModelPricing | undefined {
   if (OPENAI_PRICING[model]) return OPENAI_PRICING[model];
+  // OpenAI model ids and our pricing keys use dotted version numbers
+  // ("gpt-5.4"); we do NOT normalise dots to dashes here since that would
+  // break the existing prefix table. The dotted/dashed normalisation is
+  // only needed for Anthropic (Scout writes "claude-opus-4.7" where Claude
+  // Code writes "claude-opus-4-7"; the OpenAI side has no such collision).
   const lower = model.toLowerCase();
   // Order matters: longest/most-specific stems first so "gpt-5.4-mini" doesn't
   // get swallowed by a "gpt-5.4" prefix check.
@@ -96,8 +113,36 @@ function lookupOpenAI(model: string): ModelPricing | undefined {
  */
 export function pricingForModel(
   model: string | null | undefined,
-  provider: "claude" | "codex" | "cowork"
+  provider: "claude" | "codex" | "cowork" | "scout"
 ): PricingConfig {
+  // Scout is special: it can host either Anthropic or OpenAI models in the
+  // same session, switched mid-flight by the user. We pick the family by
+  // inspecting the model id itself rather than the static provider tag.
+  if (provider === "scout") {
+    if (model && typeof model === "string" && model.trim()) {
+      const m = model.trim();
+      const lower = normalizeModelId(m).toLowerCase();
+      if (lower.startsWith("claude-")) {
+        const hit = lookupAnthropic(m);
+        if (hit) return perToken(hit);
+      } else if (
+        lower.startsWith("gpt-") ||
+        lower.startsWith("o1") ||
+        lower.startsWith("o3") ||
+        lower.startsWith("codex")
+      ) {
+        const hit = lookupOpenAI(m);
+        if (hit) return perToken(hit);
+      } else {
+        // Unknown family — try Anthropic first since Scout is primarily a
+        // Claude-backed surface, then fall through to the default below.
+        const hit = lookupAnthropic(m);
+        if (hit) return perToken(hit);
+      }
+    }
+    return perToken(ANTHROPIC_PRICING[ANTHROPIC_DEFAULT_KEY]);
+  }
+
   const isAnthropicProvider = provider === "claude" || provider === "cowork";
 
   if (model && typeof model === "string" && model.trim()) {
