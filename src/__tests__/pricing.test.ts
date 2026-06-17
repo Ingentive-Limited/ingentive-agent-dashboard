@@ -98,6 +98,37 @@ describe("pricingForModel", () => {
     expect(p.output).toBeCloseTo(8 / 1_000_000, 12);
   });
 
+  it("normalises dotted Scout model ids to the same family as dashed ones", () => {
+    // Scout emits dotted ids ("claude-opus-4.7"); Claude Code/Codex use dashes
+    // ("claude-opus-4-7"). Both must resolve to the same Opus 4 rate sheet.
+    const dotted = pricingForModel("claude-opus-4.7", "scout");
+    const dashed = pricingForModel("claude-opus-4-7", "claude");
+    expect(dotted.input).toBeCloseTo(dashed.input, 12);
+    expect(dotted.output).toBeCloseTo(dashed.output, 12);
+    expect(dotted.cacheWrite).toBeCloseTo(dashed.cacheWrite, 12);
+    expect(dotted.cacheRead).toBeCloseTo(dashed.cacheRead, 12);
+  });
+
+  it("resolves Scout Sonnet ids (dotted) to Sonnet 4 rates", () => {
+    const p = pricingForModel("claude-sonnet-4.5", "scout");
+    expect(p.input).toBeCloseTo(3 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(15 / 1_000_000, 12);
+  });
+
+  it("routes Scout GPT-family models through OpenAI pricing", () => {
+    // A hypothetical Scout session whose user switched to a GPT-5.4 model:
+    // even though provider is "scout", the prefix should pull OpenAI rates.
+    const p = pricingForModel("gpt-5.4", "scout");
+    expect(p.input).toBeCloseTo(2.5 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(10 / 1_000_000, 12);
+  });
+
+  it("falls back to Sonnet 4 for Scout when the model is unknown", () => {
+    const p = pricingForModel(null, "scout");
+    expect(p.input).toBeCloseTo(3 / 1_000_000, 12);
+    expect(p.output).toBeCloseTo(15 / 1_000_000, 12);
+  });
+
   it("publishes anthropic and openai pricing tables", () => {
     expect(ANTHROPIC_PRICING["claude-opus-4"].output).toBe(75);
     expect(ANTHROPIC_PRICING["claude-sonnet-4"].output).toBe(15);

@@ -24,6 +24,7 @@
 import * as claude from "./claude-data";
 import * as codex from "./codex-data";
 import * as cowork from "./cowork-data";
+import * as scout from "./scout-data";
 
 let warmupStarted = false;
 
@@ -58,6 +59,10 @@ export function startBackgroundWarmup(): void {
       // Cowork — discoverManifests + tokensFromAudit per file.
       cowork.getOverview(),
       cowork.getDailyTokenUsage(140),
+      // Scout — discoverSessions + tokensFromEvents per file.
+      scout.getDailyTokenUsage(140),
+      scout.getOverview(),
+      scout.getSessionHistory(),
     ])
       .then((results) => {
         const ms = Date.now() - start;
