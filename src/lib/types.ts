@@ -1,4 +1,4 @@
-export type Provider = "claude" | "codex" | "cowork" | "scout";
+export type Provider = "claude" | "codex" | "cowork" | "scout" | "copilot";
 
 export interface ClaudeSession {
   pid: number;
@@ -183,6 +183,7 @@ export interface SystemStatus {
   claude?: ProviderStatus;
   codex?: ProviderStatus;
   scout?: ProviderStatus;
+  copilot?: ProviderStatus;
   activeSessions: number;
 }
 
