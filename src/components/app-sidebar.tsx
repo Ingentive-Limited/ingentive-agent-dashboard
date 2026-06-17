@@ -16,6 +16,7 @@ import {
   Bot,
   Layers,
   Compass,
+  MessageSquare,
 } from "lucide-react";
 import {
   Sidebar,
@@ -126,6 +127,10 @@ const providerOptions: { value: ProviderFilter; label: string; icon: React.Compo
   // today. Vendor / tool is distinct and the cost / project rollup should
   // not blend into the Claude family.
   { value: "scout", label: "Scout", icon: Compass },
+  // GitHub Copilot Chat (VS Code) — its own vendor (Microsoft / GitHub),
+  // its own pricing (Copilot premium-request multipliers), and its own
+  // transcript format (~/Library/Application Support/Code/...).
+  { value: "copilot", label: "Copilot", icon: MessageSquare },
 ];
 
 // useSyncExternalStore plumbing for platform detection. Subscribe is a no-op

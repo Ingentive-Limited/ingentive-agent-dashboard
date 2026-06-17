@@ -40,6 +40,8 @@ function formatProviderLabel(provider: Provider | undefined): string {
   if (provider === "claude") return "Claude";
   if (provider === "codex") return "Codex";
   if (provider === "cowork") return "Cowork";
+  if (provider === "scout") return "Scout";
+  if (provider === "copilot") return "Copilot";
   return "";
 }
 

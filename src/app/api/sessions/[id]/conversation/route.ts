@@ -12,14 +12,21 @@ import {
  * for a "cowork" or "scout" session explicitly — both live under the Claude
  * family in the sidebar but have their own JSONL parsers.
  */
-type ConversationProvider = "claude" | "codex" | "cowork" | "scout" | "all";
+type ConversationProvider =
+  | "claude"
+  | "codex"
+  | "cowork"
+  | "scout"
+  | "copilot"
+  | "all";
 
 function parseConversationProvider(value: string | null): ConversationProvider {
   if (
     value === "claude" ||
     value === "codex" ||
     value === "cowork" ||
-    value === "scout"
+    value === "scout" ||
+    value === "copilot"
   ) {
     return value;
   }
@@ -97,11 +104,16 @@ export async function GET(
     );
   }
 
-  // Codex, Cowork, and Scout sessions use different JSONL formats than Claude
-  // Code's projects/*.jsonl. Delegate to each provider's getConversationPreview
-  // and translate to this route's shape so the existing ConversationViewer
-  // component can render them without changes.
-  if (provider === "codex" || provider === "cowork" || provider === "scout") {
+  // Codex, Cowork, Scout, and Copilot sessions use different JSONL formats
+  // than Claude Code's projects/*.jsonl. Delegate to each provider's
+  // getConversationPreview and translate to this route's shape so the
+  // existing ConversationViewer component can render them without changes.
+  if (
+    provider === "codex" ||
+    provider === "cowork" ||
+    provider === "scout" ||
+    provider === "copilot"
+  ) {
     try {
       const previews = await getConversationPreview(id, MAX_MESSAGES, provider);
       const messages = previews.map((m) => ({

@@ -20,6 +20,12 @@ export function cn(...inputs: ClassValue[]) {
  *
  * Cowork sessions all share entrypoint "cowork" → "Cowork".
  * Scout sessions all share entrypoint "scout" → "Scout".
+ *
+ * Copilot entrypoints derive from VS Code's `metadata.agentId`:
+ *   - "copilot-edit"     → "Copilot Edit"
+ *   - "copilot-ask"      → "Copilot Ask"
+ *   - "copilot-terminal" → "Copilot Terminal"
+ *   - "copilot"          → "Copilot"
  */
 export function formatEntrypoint(entrypoint: string | undefined | null): string {
   if (!entrypoint) return "CLI";
@@ -30,6 +36,10 @@ export function formatEntrypoint(entrypoint: string | undefined | null): string 
   if (normalized === "cli") return "CLI";
   if (normalized === "cowork") return "Cowork";
   if (normalized === "scout") return "Scout";
+  if (normalized === "copilot") return "Copilot";
+  if (normalized === "copilot-edit") return "Copilot Edit";
+  if (normalized === "copilot-ask") return "Copilot Ask";
+  if (normalized === "copilot-terminal") return "Copilot Terminal";
   // Fallback: return the raw value with first letter capitalized so unknown
   // sources still render something readable.
   return entrypoint.charAt(0).toUpperCase() + entrypoint.slice(1);
