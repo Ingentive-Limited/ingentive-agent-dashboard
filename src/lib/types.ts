@@ -182,6 +182,7 @@ export interface ProviderStatus {
 export interface SystemStatus {
   claude?: ProviderStatus;
   codex?: ProviderStatus;
+  scout?: ProviderStatus;
   activeSessions: number;
 }
 

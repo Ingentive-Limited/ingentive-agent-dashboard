@@ -38,10 +38,10 @@ import type {
   CostEstimate,
 } from "./types";
 
-export type ProviderFilter = "claude" | "codex" | "all";
+export type ProviderFilter = "claude" | "codex" | "scout" | "all";
 
 function parseProvider(value: string | null | undefined): ProviderFilter {
-  if (value === "claude" || value === "codex") return value;
+  if (value === "claude" || value === "codex" || value === "scout") return value;
   return "all";
 }
 
@@ -52,13 +52,15 @@ export { parseProvider };
 export async function getActiveSessions(provider?: ProviderFilter): Promise<ClaudeSession[]> {
   const p = provider ?? "all";
   if (p === "codex") return codex.getActiveSessions();
+  if (p === "scout") return scout.getActiveSessions();
   if (p === "claude") {
-    const [c, w, s] = await Promise.all([
+    // Claude family = Claude Code (CLI/Desktop) + Cowork. Scout is its own
+    // top-level filter, so it's NOT included here.
+    const [c, w] = await Promise.all([
       claude.getActiveSessions(),
       cowork.getActiveSessions(),
-      scout.getActiveSessions(),
     ]);
-    return [...c, ...w, ...s].sort((a, b) => b.startedAt - a.startedAt);
+    return [...c, ...w].sort((a, b) => b.startedAt - a.startedAt);
   }
   const [c, x, w, s] = await Promise.all([
     claude.getActiveSessions(),
@@ -74,13 +76,13 @@ export async function getActiveSessions(provider?: ProviderFilter): Promise<Clau
 export async function getProjects(provider?: ProviderFilter): Promise<ProjectSummary[]> {
   const p = provider ?? "all";
   if (p === "codex") return codex.getProjects();
+  if (p === "scout") return scout.getProjects();
   if (p === "claude") {
-    const [c, w, s] = await Promise.all([
+    const [c, w] = await Promise.all([
       claude.getProjects(),
       cowork.getProjects(),
-      scout.getProjects(),
     ]);
-    return [...c, ...w, ...s].sort(
+    return [...c, ...w].sort(
       (a, b) =>
         new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
     );
@@ -108,6 +110,7 @@ export async function getProjectDetail(
 
   const p = provider ?? "all";
   if (p === "codex") return codex.getProjectDetail(projectId);
+  if (p === "scout") return scout.getProjectDetail(projectId);
   if (p === "claude") return claude.getProjectDetail(projectId);
   // "all": try Claude then Codex (Cowork/Scout were already handled above)
   const result = await claude.getProjectDetail(projectId);
@@ -120,13 +123,13 @@ export async function getProjectDetail(
 export async function getSessionHistory(provider?: ProviderFilter): Promise<SessionHistory[]> {
   const p = provider ?? "all";
   if (p === "codex") return codex.getSessionHistory();
+  if (p === "scout") return scout.getSessionHistory();
   if (p === "claude") {
-    const [c, w, s] = await Promise.all([
+    const [c, w] = await Promise.all([
       claude.getSessionHistory(),
       cowork.getSessionHistory(),
-      scout.getSessionHistory(),
     ]);
-    return [...c, ...w, ...s].sort((a, b) => b.startedAt - a.startedAt);
+    return [...c, ...w].sort((a, b) => b.startedAt - a.startedAt);
   }
   const [c, x, w, s] = await Promise.all([
     claude.getSessionHistory(),
@@ -159,13 +162,13 @@ export async function getDailyTokenUsage(
 ): Promise<DailyTokenUsage[]> {
   const p = provider ?? "all";
   if (p === "codex") return codex.getDailyTokenUsage(days);
+  if (p === "scout") return scout.getDailyTokenUsage(days);
   if (p === "claude") {
-    const [c, w, s] = await Promise.all([
+    const [c, w] = await Promise.all([
       claude.getDailyTokenUsage(days),
       cowork.getDailyTokenUsage(days),
-      scout.getDailyTokenUsage(days),
     ]);
-    return concatDailyUsage(c, w, s);
+    return concatDailyUsage(c, w);
   }
   const [c, x, w, s] = await Promise.all([
     claude.getDailyTokenUsage(days),
@@ -179,13 +182,13 @@ export async function getDailyTokenUsage(
 export async function getProjectStats(provider?: ProviderFilter): Promise<ProjectStats[]> {
   const p = provider ?? "all";
   if (p === "codex") return codex.getProjectStats();
+  if (p === "scout") return scout.getProjectStats();
   if (p === "claude") {
-    const [c, w, s] = await Promise.all([
+    const [c, w] = await Promise.all([
       claude.getProjectStats(),
       cowork.getProjectStats(),
-      scout.getProjectStats(),
     ]);
-    return [...c, ...w, ...s].sort(
+    return [...c, ...w].sort(
       (a, b) =>
         new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
     );
@@ -207,13 +210,13 @@ export async function getProjectStats(provider?: ProviderFilter): Promise<Projec
 export async function searchAll(query: string, provider?: ProviderFilter): Promise<SearchResult[]> {
   const p = provider ?? "all";
   if (p === "codex") return codex.searchAll(query);
+  if (p === "scout") return scout.searchAll(query);
   if (p === "claude") {
-    const [c, w, s] = await Promise.all([
+    const [c, w] = await Promise.all([
       claude.searchAll(query),
       cowork.searchAll(query),
-      scout.searchAll(query),
     ]);
-    return [...c, ...w, ...s].slice(0, 20);
+    return [...c, ...w].slice(0, 20);
   }
   const [c, x, w, s] = await Promise.all([
     claude.searchAll(query),
@@ -318,8 +321,9 @@ export async function getSessionErrors(
 export async function getScheduledTasks(provider?: ProviderFilter): Promise<ScheduledTask[]> {
   const p = provider ?? "all";
   // Cowork inherits the Claude scheduled-tasks store, so we don't double-add
-  // cowork tasks under the Claude filter.
+  // cowork tasks under the Claude filter. Scout has no scheduling concept.
   if (p === "codex") return codex.getScheduledTasks();
+  if (p === "scout") return [];
   if (p === "claude") return claude.getScheduledTasks();
   const [c, x] = await Promise.all([
     claude.getScheduledTasks(),
@@ -333,7 +337,10 @@ export async function getScheduledTasks(provider?: ProviderFilter): Promise<Sche
 export async function getInstalledPlugins(provider?: ProviderFilter): Promise<InstalledPlugin[]> {
   const p = provider ?? "all";
   // Same as scheduled tasks: Cowork uses Claude's plugin set, so no duplication.
+  // Scout has its own (separate) ecosystem of MCP servers but no equivalent
+  // "installed plugins" surface we can enumerate today.
   if (p === "codex") return codex.getInstalledPlugins();
+  if (p === "scout") return [];
   if (p === "claude") return claude.getInstalledPlugins();
   const [c, x] = await Promise.all([
     claude.getInstalledPlugins(),
@@ -408,13 +415,13 @@ function mergeOverviews(...parts: DashboardOverview[]): DashboardOverview {
 export async function getOverview(provider?: ProviderFilter): Promise<DashboardOverview> {
   const p = provider ?? "all";
   if (p === "codex") return codex.getOverview();
+  if (p === "scout") return scout.getOverview();
   if (p === "claude") {
-    const [c, w, s] = await Promise.all([
+    const [c, w] = await Promise.all([
       claude.getOverview(),
       cowork.getOverview(),
-      scout.getOverview(),
     ]);
-    return mergeOverviews(c, w, s);
+    return mergeOverviews(c, w);
   }
   const [c, x, w, s] = await Promise.all([
     claude.getOverview(),
@@ -431,30 +438,39 @@ export async function getSystemStatus(provider?: ProviderFilter): Promise<System
   const p = provider ?? "all";
   if (p === "codex") return codex.getSystemStatus();
 
+  if (p === "scout") {
+    const [s, scoutSessions] = await Promise.all([
+      scout.getScoutProviderStatus(),
+      scout.getActiveSessions(),
+    ]);
+    return {
+      scout: s,
+      activeSessions: scoutSessions.filter((sess) => sess.isAlive).length,
+    };
+  }
+
   if (p === "claude") {
-    // Surface only the Claude status row. Cowork and Scout are grouped under
-    // Claude in the UI; both run on the Anthropic API so collapsing the row
-    // doesn't lose health information.
-    const [c, claudeSessions, coworkSessions, scoutSessions] = await Promise.all([
+    // Claude row covers Claude Code + Cowork (both Anthropic). Scout has its
+    // own top-level filter and its own status row — don't roll it in here.
+    const [c, claudeSessions, coworkSessions] = await Promise.all([
       claude.getClaudeProviderStatus(),
       claude.getActiveSessions(),
       cowork.getActiveSessions(),
-      scout.getActiveSessions(),
     ]);
     return {
       claude: c,
       activeSessions:
         claudeSessions.filter((s) => s.isAlive).length +
-        coworkSessions.filter((s) => s.isAlive).length +
-        scoutSessions.filter((s) => s.isAlive).length,
+        coworkSessions.filter((s) => s.isAlive).length,
     };
   }
 
   // all
-  const [c, x, claudeSessions, codexSessions, coworkSessions, scoutSessions] =
+  const [c, x, s, claudeSessions, codexSessions, coworkSessions, scoutSessions] =
     await Promise.all([
       claude.getClaudeProviderStatus(),
       codex.getCodexProviderStatus(),
+      scout.getScoutProviderStatus(),
       claude.getActiveSessions(),
       codex.getActiveSessions(),
       cowork.getActiveSessions(),
@@ -463,10 +479,11 @@ export async function getSystemStatus(provider?: ProviderFilter): Promise<System
   return {
     claude: c,
     codex: x,
+    scout: s,
     activeSessions:
-      claudeSessions.filter((s) => s.isAlive).length +
-      codexSessions.filter((s) => s.isAlive).length +
-      coworkSessions.filter((s) => s.isAlive).length +
-      scoutSessions.filter((s) => s.isAlive).length,
+      claudeSessions.filter((sess) => sess.isAlive).length +
+      codexSessions.filter((sess) => sess.isAlive).length +
+      coworkSessions.filter((sess) => sess.isAlive).length +
+      scoutSessions.filter((sess) => sess.isAlive).length,
   };
 }
