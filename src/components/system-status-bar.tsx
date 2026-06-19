@@ -71,11 +71,15 @@ export function SystemStatusBar() {
   const { data } = usePolling<SystemStatus>(`/api/status?provider=${provider}`, 30000);
   const { isApi } = useBillingMode();
 
-  // Collapsed by default; persist user's choice across reloads.
+  // Collapsed by default; persist user's choice across reloads. Initial state
+  // is always `false` to keep SSR and the first client render identical (no
+  // hydration mismatch). The hydrate-from-localStorage effect runs once on
+  // mount — setState-in-effect is intentional here.
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe localStorage hydration
       if (stored === "1") setExpanded(true);
     } catch {
       /* localStorage unavailable */
