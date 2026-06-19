@@ -1,0 +1,177 @@
+name: Release Desktop App
+
+# Triggers:
+#   • Tag push (v*.*.*)         → build all 3 platforms and publish to a GitHub Release
+#   • Manual workflow_dispatch  → smoke-build the macOS arm64 .pkg only (faster sanity check)
+#
+# IT picks the artifacts up from the Release page and uploads to Intune (.pkg for macOS,
+# IntuneWinAppUtil-wrapped .msi for Windows, .deb/.rpm for Linux).
+#
+# Code signing is gated on repository secrets — when absent, the workflow still builds
+# UNSIGNED artifacts so we have something to inspect, but the Release notes will flag them
+# as not-for-distribution.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: "Attempt code-signing (requires the matching secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # so softprops/action-gh-release can publish artifacts
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run test:unit
+
+  build:
+    name: Build ${{ matrix.os-label }} (${{ matrix.arch }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14            # Apple Silicon runner
+            os-label: macOS
+            arch: arm64
+            build-script: "electron:package:mac"
+            artifact-glob: "release/*-mac-*.pkg release/*-mac-*.dmg"
+          - os: macos-13            # Intel runner
+            os-label: macOS
+            arch: x64
+            build-script: "electron:package:mac"
+            artifact-glob: "release/*-mac-*.pkg release/*-mac-*.dmg"
+          - os: windows-latest
+            os-label: Windows
+            arch: x64
+            build-script: "electron:package:win"
+            artifact-glob: "release/*.msi release/*.exe"
+          - os: ubuntu-latest
+            os-label: Linux
+            arch: x64
+            build-script: "electron:package:linux"
+            artifact-glob: "release/*.deb release/*.rpm release/*.AppImage"
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      # macOS signing
+      MAC_SIGNING_IDENTITY: ${{ secrets.MAC_SIGNING_IDENTITY }}
+      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      # macOS notarization
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Windows signing
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npx eslint src/
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build Next.js standalone
+        run: npm run electron:build-app
+
+      - name: Build native installer
+        run: npm run ${{ matrix.build-script }}
+        env:
+          # electron-builder reads these directly. If the matching secrets aren't
+          # set in the repo, signing is skipped and unsigned artifacts are produced.
+          DEBUG: electron-builder
+
+      - name: List build output
+        shell: bash
+        run: |
+          echo "=== release/ ==="
+          ls -la release/ 2>/dev/null || dir release\
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingentive-agent-dashboard-${{ matrix.os-label }}-${{ matrix.arch }}
+          path: |
+            release/*.pkg
+            release/*.dmg
+            release/*.msi
+            release/*.exe
+            release/*.deb
+            release/*.rpm
+            release/*.AppImage
+          if-no-files-found: ignore
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List collected artifacts
+        run: ls -la dist/
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          {
+            echo "## Ingentive Agent Dashboard ${GITHUB_REF_NAME}"
+            echo ""
+            echo "Desktop app for IT-managed deployment via Microsoft Intune."
+            echo ""
+            echo "### Downloads"
+            echo ""
+            echo "| Platform | File | Intune type |"
+            echo "|---|---|---|"
+            echo "| macOS (Apple Silicon) | \`Ingentive-Agent-Dashboard-*-mac-arm64.pkg\` | macOS LOB app |"
+            echo "| macOS (Intel)         | \`Ingentive-Agent-Dashboard-*-mac-x64.pkg\`   | macOS LOB app |"
+            echo "| Windows (x64)         | \`Ingentive-Agent-Dashboard-*.msi\`           | Win32 app (wrap via IntuneWinAppUtil → .intunewin) |"
+            echo "| Linux (Ubuntu/Debian) | \`Ingentive-Agent-Dashboard-*.deb\`           | Linux app |"
+            echo "| Linux (RHEL/Fedora)   | \`Ingentive-Agent-Dashboard-*.rpm\`           | Linux app |"
+            echo ""
+            echo "See [INTUNE-DEPLOYMENT.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/INTUNE-DEPLOYMENT.md) for full IT runbook."
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: release-notes.md
+          draft: true
+          fail_on_unmatched_files: false

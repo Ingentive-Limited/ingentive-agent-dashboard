@@ -9,13 +9,27 @@ import {
 /**
  * Conversation-specific provider parsing. Unlike the UI provider filter
  * (claude / codex / all), the conversation viewer needs to be able to ask
- * for a "cowork" session explicitly — Cowork lives under the Claude family
- * in the sidebar but has its own JSONL parser.
+ * for a "cowork" or "scout" session explicitly — both live under the Claude
+ * family in the sidebar but have their own JSONL parsers.
  */
-type ConversationProvider = "claude" | "codex" | "cowork" | "all";
+type ConversationProvider =
+  | "claude"
+  | "codex"
+  | "cowork"
+  | "scout"
+  | "copilot"
+  | "all";
 
 function parseConversationProvider(value: string | null): ConversationProvider {
-  if (value === "claude" || value === "codex" || value === "cowork") return value;
+  if (
+    value === "claude" ||
+    value === "codex" ||
+    value === "cowork" ||
+    value === "scout" ||
+    value === "copilot"
+  ) {
+    return value;
+  }
   return "all";
 }
 
@@ -90,11 +104,16 @@ export async function GET(
     );
   }
 
-  // Codex and Cowork sessions use different JSONL formats than Claude Code's
-  // projects/*.jsonl. Delegate to each provider's getConversationPreview and
-  // translate to this route's shape so the existing ConversationViewer
-  // component can render them without changes.
-  if (provider === "codex" || provider === "cowork") {
+  // Codex, Cowork, Scout, and Copilot sessions use different JSONL formats
+  // than Claude Code's projects/*.jsonl. Delegate to each provider's
+  // getConversationPreview and translate to this route's shape so the
+  // existing ConversationViewer component can render them without changes.
+  if (
+    provider === "codex" ||
+    provider === "cowork" ||
+    provider === "scout" ||
+    provider === "copilot"
+  ) {
     try {
       const previews = await getConversationPreview(id, MAX_MESSAGES, provider);
       const messages = previews.map((m) => ({

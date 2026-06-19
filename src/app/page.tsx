@@ -380,7 +380,15 @@ export default function DashboardPage() {
           onOpenChange={(open) => {
             if (!open) setViewingSession(null);
           }}
-          providerName={viewingSession.provider === "codex" ? "Codex" : "Claude"}
+          providerName={
+            viewingSession.provider === "codex"
+              ? "Codex"
+              : viewingSession.provider === "scout"
+              ? "Scout"
+              : viewingSession.provider === "copilot"
+              ? "Copilot"
+              : "Claude"
+          }
           provider={viewingSession.provider}
         />
       )}

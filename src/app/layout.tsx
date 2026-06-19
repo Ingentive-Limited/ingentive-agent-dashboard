@@ -22,7 +22,7 @@ const robotoMono = Roboto_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ingentive Agent OS",
+  title: "Ingentive Agent Dashboard",
   description: "AI Agent Management Dashboard",
 };
 

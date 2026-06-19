@@ -121,29 +121,64 @@ export function TokenChart({ data }: { data: TokenDataPoint[] }) {
     });
   }, []);
 
-  // Use a categorical x-axis (one slot per data point) so that recharts
-  // reliably honors our custom `ticks` prop — recharts v3 has known issues
-  // applying custom ticks when the axis is `type="number"` with a dataKey.
-  const formatted = useMemo(
-    () =>
-      data
-        .map((d) => {
-          const date = new Date(d.timestamp);
-          const ts = date.getTime();
-          if (!Number.isFinite(ts)) return null;
-          return {
-            ...d,
-            ts,
-            time: date.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          };
-        })
-        .filter((d): d is NonNullable<typeof d> => d !== null)
-        .sort((a, b) => a.ts - b.ts),
-    [data]
-  );
+  // Use a categorical x-axis (one slot per minute) so recharts reliably honors
+  // our custom `ticks` prop — recharts v3 has known issues with custom ticks on
+  // numeric axes. We aggregate per-minute on the way in: multiple sessions
+  // (Claude + Cowork + Codex + Scout) can each emit a TokenDataPoint within
+  // the same minute, and without aggregation:
+  //   1. recharts uses the categorical key (the "time" HH:MM string) as a
+  //      React key internally → duplicate-key warnings on every render
+  //   2. the chart would show several overlapping bars at the same minute
+  //      slot, which is visually confusing
+  // Summing all providers' tokens into one bucket per minute fixes both.
+  const formatted = useMemo(() => {
+    const byMinute = new Map<
+      string,
+      {
+        time: string;
+        ts: number;
+        input_tokens: number;
+        output_tokens: number;
+        cache_creation_input_tokens: number;
+        cache_read_input_tokens: number;
+        cumulative_input: number;
+        cumulative_output: number;
+      }
+    >();
+    for (const d of data) {
+      const date = new Date(d.timestamp);
+      const ts = date.getTime();
+      if (!Number.isFinite(ts)) continue;
+      const time = date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const existing = byMinute.get(time);
+      if (existing) {
+        existing.input_tokens += d.input_tokens;
+        existing.output_tokens += d.output_tokens;
+        existing.cache_creation_input_tokens += d.cache_creation_input_tokens;
+        existing.cache_read_input_tokens += d.cache_read_input_tokens;
+        // The cumulative_* fields are per-provider snapshots; the chart
+        // doesn't render them as series so just keep the latest value.
+        existing.cumulative_input = d.cumulative_input;
+        existing.cumulative_output = d.cumulative_output;
+        if (ts > existing.ts) existing.ts = ts;
+      } else {
+        byMinute.set(time, {
+          time,
+          ts,
+          input_tokens: d.input_tokens,
+          output_tokens: d.output_tokens,
+          cache_creation_input_tokens: d.cache_creation_input_tokens,
+          cache_read_input_tokens: d.cache_read_input_tokens,
+          cumulative_input: d.cumulative_input,
+          cumulative_output: d.cumulative_output,
+        });
+      }
+    }
+    return Array.from(byMinute.values()).sort((a, b) => a.ts - b.ts);
+  }, [data]);
 
   // Identify the indices that are the FIRST data point in each hour — those
   // are the natural hour boundaries to surface as ticks. We then apply a

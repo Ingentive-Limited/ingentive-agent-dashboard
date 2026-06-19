@@ -15,6 +15,8 @@ import {
   Sparkles,
   Bot,
   Layers,
+  Compass,
+  MessageSquare,
 } from "lucide-react";
 import {
   Sidebar,
@@ -121,6 +123,14 @@ const providerOptions: { value: ProviderFilter; label: string; icon: React.Compo
   // run on Anthropic models, so we treat them as a single provider family.
   { value: "claude", label: "Claude", icon: Sparkles },
   { value: "codex", label: "Codex", icon: Bot },
+  // Microsoft Scout — its own filter even though the model is Anthropic
+  // today. Vendor / tool is distinct and the cost / project rollup should
+  // not blend into the Claude family.
+  { value: "scout", label: "Scout", icon: Compass },
+  // GitHub Copilot Chat (VS Code) — its own vendor (Microsoft / GitHub),
+  // its own pricing (Copilot premium-request multipliers), and its own
+  // transcript format (~/Library/Application Support/Code/...).
+  { value: "copilot", label: "Copilot", icon: MessageSquare },
 ];
 
 // useSyncExternalStore plumbing for platform detection. Subscribe is a no-op
@@ -149,7 +159,7 @@ export function AppSidebar() {
     <Sidebar aria-label="Main navigation">
       <SidebarHeader className="py-2" style={{ paddingLeft: 16, paddingRight: 8 }}>
         <Logo className="-ml-0.5" />
-        <p className="text-[10px] text-muted-foreground leading-none">Agent OS</p>
+        <p className="text-[10px] text-muted-foreground leading-none">Agent Dashboard</p>
       </SidebarHeader>
       <SidebarContent>
         <NavGroup label="Monitor" links={monitorLinks} isActive={isActive} modifier={modifier} />

@@ -128,6 +128,30 @@ export async function POST(request: Request) {
       );
     }
 
+    // Scout sessions live inside the Microsoft Scout Electron app. Same
+    // story — there's no CLI to resume against.
+    if (session.provider === "scout") {
+      return NextResponse.json(
+        {
+          error:
+            "Scout sessions live inside the Microsoft Scout app and can't be resumed from a terminal. Open Scout to continue this session.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Copilot Chat sessions live inside VS Code's Copilot Chat extension —
+    // there's no terminal CLI to resume against.
+    if (session.provider === "copilot") {
+      return NextResponse.json(
+        {
+          error:
+            "Copilot Chat sessions live inside VS Code's Copilot Chat extension and can't be resumed from a terminal. Open VS Code to continue this session.",
+        },
+        { status: 400 }
+      );
+    }
+
     const trustedCwd = session.cwd;
     const resolvedProvider = session.provider === "codex" ? "codex" : "claude";
 

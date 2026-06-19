@@ -1,0 +1,76 @@
+appId: com.ingentive.agent-os
+productName: Ingentive Agent Dashboard
+copyright: Copyright © Ingentive Limited
+artifactName: "Ingentive-Agent-Dashboard-${version}-${os}-${arch}.${ext}"
+
+asar: true
+asarUnpack:
+  - "standalone/**"
+
+extraResources:
+  - from: ".next/standalone"
+    to: "app/standalone"
+    filter: ["**/*"]
+  - from: ".next/static"
+    to: "app/standalone/.next/static"
+    filter: ["**/*"]
+  - from: "public"
+    to: "app/standalone/public"
+    filter: ["**/*"]
+
+files:
+  - "electron/**/*"
+  - "package.json"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,changelog.md}"
+  - "!**/node_modules/*/{test,tests,__tests__,docs,doc,example,examples}/**"
+  - "!**/*.map"
+  - "!.next/cache/**"
+
+directories:
+  buildResources: electron-resources
+  output: release
+
+mac:
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: electron-resources/entitlements.mac.plist
+  entitlementsInherit: electron-resources/entitlements.mac.plist
+  icon: electron-resources/icon.icns
+  target:
+    - target: pkg
+      arch: [arm64]
+    - target: dmg
+      arch: [arm64]
+  identity: ${env.MAC_SIGNING_IDENTITY}
+
+pkg:
+  isVersionChecked: false
+  isRelocatable: false
+  installLocation: /Applications
+
+dmg:
+  writeUpdateInfo: false
+  sign: false
+
+win:
+  icon: electron-resources/icon.ico
+  target:
+    - target: msi
+      arch: [x64]
+  signingHashAlgorithms: ["sha256"]
+
+msi:
+  perMachine: true
+  oneClick: false
+
+linux:
+  category: Development
+  icon: electron-resources/icon.png
+  target:
+    - target: deb
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+  maintainer: "Ingentive Limited <it@ingentive.com>"
+  vendor: "Ingentive Limited"
