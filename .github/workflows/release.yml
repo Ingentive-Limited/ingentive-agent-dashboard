@@ -117,7 +117,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ingentive-agent-os-${{ matrix.os-label }}-${{ matrix.arch }}
+          name: ingentive-agent-dashboard-${{ matrix.os-label }}-${{ matrix.arch }}
           path: |
             release/*.pkg
             release/*.dmg
@@ -150,7 +150,7 @@ jobs:
         id: notes
         run: |
           {
-            echo "## Ingentive Agent OS ${GITHUB_REF_NAME}"
+            echo "## Ingentive Agent Dashboard ${GITHUB_REF_NAME}"
             echo ""
             echo "Desktop app for IT-managed deployment via Microsoft Intune."
             echo ""
@@ -158,11 +158,11 @@ jobs:
             echo ""
             echo "| Platform | File | Intune type |"
             echo "|---|---|---|"
-            echo "| macOS (Apple Silicon) | \`Ingentive-Agent-OS-*-mac-arm64.pkg\` | macOS LOB app |"
-            echo "| macOS (Intel)         | \`Ingentive-Agent-OS-*-mac-x64.pkg\`   | macOS LOB app |"
-            echo "| Windows (x64)         | \`Ingentive-Agent-OS-*.msi\`           | Win32 app (wrap via IntuneWinAppUtil → .intunewin) |"
-            echo "| Linux (Ubuntu/Debian) | \`Ingentive-Agent-OS-*.deb\`           | Linux app |"
-            echo "| Linux (RHEL/Fedora)   | \`Ingentive-Agent-OS-*.rpm\`           | Linux app |"
+            echo "| macOS (Apple Silicon) | \`Ingentive-Agent-Dashboard-*-mac-arm64.pkg\` | macOS LOB app |"
+            echo "| macOS (Intel)         | \`Ingentive-Agent-Dashboard-*-mac-x64.pkg\`   | macOS LOB app |"
+            echo "| Windows (x64)         | \`Ingentive-Agent-Dashboard-*.msi\`           | Win32 app (wrap via IntuneWinAppUtil → .intunewin) |"
+            echo "| Linux (Ubuntu/Debian) | \`Ingentive-Agent-Dashboard-*.deb\`           | Linux app |"
+            echo "| Linux (RHEL/Fedora)   | \`Ingentive-Agent-Dashboard-*.rpm\`           | Linux app |"
             echo ""
             echo "See [INTUNE-DEPLOYMENT.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/INTUNE-DEPLOYMENT.md) for full IT runbook."
           } > release-notes.md

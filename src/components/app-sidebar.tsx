@@ -159,7 +159,7 @@ export function AppSidebar() {
     <Sidebar aria-label="Main navigation">
       <SidebarHeader className="py-2" style={{ paddingLeft: 16, paddingRight: 8 }}>
         <Logo className="-ml-0.5" />
-        <p className="text-[10px] text-muted-foreground leading-none">Agent OS</p>
+        <p className="text-[10px] text-muted-foreground leading-none">Agent Dashboard</p>
       </SidebarHeader>
       <SidebarContent>
         <NavGroup label="Monitor" links={monitorLinks} isActive={isActive} modifier={modifier} />

@@ -1,10 +1,10 @@
-# Ingentive Agent OS
+# Ingentive Agent Dashboard
 
 A local management dashboard for monitoring and interacting with your active **Claude Code**, **OpenAI Codex**, and **Claude Cowork** sessions, projects, token usage, and scheduled tasks. Works on macOS, Windows, and Linux.
 
-![Ingentive Agent OS Dashboard](preview.png)
+![Ingentive Agent Dashboard Dashboard](preview.png)
 
-Ingentive Agent OS reads data directly from `~/.claude/`, `~/.codex/`, and the Claude Desktop app storage to give you real-time visibility into everything your AI coding agents are doing on your machine. Switch between providers with a single click, or view sessions from all three side-by-side.
+Ingentive Agent Dashboard reads data directly from `~/.claude/`, `~/.codex/`, and the Claude Desktop app storage to give you real-time visibility into everything your AI coding agents are doing on your machine. Switch between providers with a single click, or view sessions from all three side-by-side.
 
 ## Features
 
@@ -45,7 +45,7 @@ You don't need both providers installed — the dashboard detects what's availab
 
 ## Platform Support
 
-Ingentive Agent OS supports macOS, Windows, and Linux. Session data is read from platform-appropriate locations, and clicking a session opens it in the native terminal for each OS.
+Ingentive Agent Dashboard supports macOS, Windows, and Linux. Session data is read from platform-appropriate locations, and clicking a session opens it in the native terminal for each OS.
 
 | Platform | Claude data directory | Codex data directory | Terminal |
 |----------|----------------------|---------------------|----------|
@@ -60,7 +60,7 @@ Claude Desktop app data is additionally read from `~/Library/Application Support
 ### Install dependencies
 
 ```bash
-cd ingentive-agent-os
+cd ingentive-agent-dashboard
 npm install
 ```
 

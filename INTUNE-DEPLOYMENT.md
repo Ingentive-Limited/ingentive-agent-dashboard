@@ -1,7 +1,7 @@
-# Ingentive Agent OS — Intune Deployment Guide
+# Ingentive Agent Dashboard — Intune Deployment Guide
 
 This document is for the IT team. It explains how to build signed,
-notarized, Intune-ready packages of the Ingentive Agent OS desktop wrapper
+notarized, Intune-ready packages of the Ingentive Agent Dashboard desktop wrapper
 and push them to user machines.
 
 The wrapper is a per-user Electron app that boots the Next.js dashboard on
@@ -165,7 +165,7 @@ Detection rule: MSI product code (Intune auto-fills from the package).
 
 1. Intune admin centre → **Apps** → **macOS** → **Add** → **Line-of-business app**.
 2. Upload the **notarized** `.pkg`.
-3. Assignment: required for the user group(s) that should have Agent OS.
+3. Assignment: required for the user group(s) that should have Agent Dashboard.
 4. Intune tracks install state via the bundle ID `com.ingentive.agent-os`.
 
 ### Windows Win32 app (.intunewin)
@@ -189,7 +189,7 @@ the Intune Linux agent installed:
 
 ## 7. Per-user vs per-machine install
 
-The Agent OS dashboard reads:
+The Agent Dashboard dashboard reads:
 
 - `~/.claude/`
 - `~/.codex/`
@@ -228,7 +228,7 @@ No in-app updater is bundled — do not enable `electron-updater`.
 | Symptom                                       | Fix                                                                 |
 |-----------------------------------------------|---------------------------------------------------------------------|
 | macOS install blocked: "unidentified developer" | Notarize the `.pkg` (section 4).                                  |
-| Dashboard never opens, tray says "Starting…"  | Check `~/Library/Logs/Ingentive Agent OS/` and the system console. |
+| Dashboard never opens, tray says "Starting…"  | Check `~/Library/Logs/Ingentive Agent Dashboard/` and the system console. |
 | Tray icon missing on Linux                    | Confirm GNOME has AppIndicator extension or use KDE/XFCE.          |
 | MSI install fails on user machines            | Confirm Intune assignment is **system** scope.                     |
 | Port 3007–3020 all busy                       | The app fails fast with a dialog; rare, but bump `MAX_PORT` in `electron/main.cjs`. |

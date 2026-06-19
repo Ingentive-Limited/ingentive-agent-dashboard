@@ -1,7 +1,7 @@
 appId: com.ingentive.agent-os
-productName: Ingentive Agent OS
+productName: Ingentive Agent Dashboard
 copyright: Copyright © Ingentive Limited
-artifactName: "Ingentive-Agent-OS-${version}-${os}-${arch}.${ext}"
+artifactName: "Ingentive-Agent-Dashboard-${version}-${os}-${arch}.${ext}"
 
 asar: true
 asarUnpack:

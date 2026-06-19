@@ -1,5 +1,5 @@
 /* eslint-disable */
-// Electron main process for Ingentive Agent OS.
+// Electron main process for Ingentive Agent Dashboard.
 // Self-contained desktop app: runs the Next.js standalone server as a child
 // process and renders the dashboard inside a BrowserWindow. No external browser.
 
@@ -17,7 +17,7 @@ try {
   Store = null;
 }
 
-const APP_NAME = "Ingentive Agent OS";
+const APP_NAME = "Ingentive Agent Dashboard";
 const DEFAULT_PORT = 3007;
 const MAX_PORT = 3020;
 const SERVER_READY_TIMEOUT_MS = 30_000;
@@ -268,7 +268,7 @@ function showLoadingIn(win) {
   // regardless of whether we're running packaged or in dev.
   const iconUrl = `file://${loadingIconPath()}`;
   win.loadFile(loadingHtmlPath(), { query: { icon: iconUrl } }).catch((err) => {
-    console.error("[ingentive-agent-os] failed to load splash:", err);
+    console.error("[ingentive-agent-dashboard] failed to load splash:", err);
   });
 }
 
@@ -405,7 +405,7 @@ async function loadDashboardInto(win) {
   try {
     await wc.loadURL(`http://127.0.0.1:${serverPort}/`);
   } catch (err) {
-    console.error("[ingentive-agent-os] failed to load dashboard:", err);
+    console.error("[ingentive-agent-dashboard] failed to load dashboard:", err);
     return;
   }
   // Give SWR a moment to land its first API responses so the user lands on
@@ -609,7 +609,7 @@ app.whenReady().then(async () => {
       await loadDashboardInto(mainWindow);
     }
   } catch (err) {
-    console.error("[ingentive-agent-os] startup failed:", err);
+    console.error("[ingentive-agent-dashboard] startup failed:", err);
     dialog.showErrorBox(APP_NAME, `Failed to start the local server:\n\n${err.message}`);
   }
 });
